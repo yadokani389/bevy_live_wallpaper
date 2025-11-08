@@ -1,0 +1,38 @@
+[package]
+edition = "2024"
+name = "bevy_live_wallpaper"
+version = "0.1.0"
+
+[features]
+wayland = [
+  "dep:wayland-backend",
+  "dep:wayland-client",
+  "dep:wayland-protocols-wlr",
+  "dep:wgpu",
+]
+
+[dependencies]
+bevy = { version = "0.17", default-features = false, features = [
+  "bevy_render",
+  "bevy_camera",
+  "bevy_window",
+  "trace",
+] }
+raw-window-handle = "0.6.2"
+
+# wayland
+wayland-backend = { version = "0.3.11", features = [
+  "client_system",
+], optional = true }
+wayland-client = { version = "0.31.11", optional = true }
+wayland-protocols-wlr = { version = "0.3.8", features = [
+  "client",
+], optional = true }
+wgpu = { version = "26.0.1", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging"] }
+
+
+[dev-dependencies]
+bevy = "0.17"
