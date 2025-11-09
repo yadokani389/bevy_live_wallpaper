@@ -7,6 +7,7 @@ use bevy::{
     color::palettes::basic::SILVER,
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    window::WindowMode,
 };
 use bevy_live_wallpaper::LiveWallpaperPlugin;
 
@@ -26,7 +27,17 @@ fn main() {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        app.add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()));
+        app.add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        );
     }
 
     app.add_plugins(LiveWallpaperPlugin)

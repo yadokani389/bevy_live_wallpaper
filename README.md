@@ -50,6 +50,7 @@ Here is a complete, cross-platform example:
 
 ```rust
 use bevy::prelude::*;
+use bevy::window::WindowMode;
 use bevy_live_wallpaper::LiveWallpaperPlugin;
 
 fn main() {
@@ -67,8 +68,14 @@ fn main() {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // On Windows, we use a normal window that gets reparented
-        app.add_plugins(DefaultPlugins);
+        // On Windows we must start as BorderlessFullscreen so the WorkerW child covers the monitor.
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                ..default()
+            }),
+            ..default()
+        }));
     }
 
     app.add_plugins(LiveWallpaperPlugin)

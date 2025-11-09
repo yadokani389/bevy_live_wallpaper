@@ -895,6 +895,7 @@ dependencies = [
  "wayland-protocols-wlr",
  "wgpu",
  "windows 0.62.2",
+ "winit",
 ]
 
 [[package]]
