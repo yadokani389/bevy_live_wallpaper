@@ -7,15 +7,23 @@ use bevy::{
     color::palettes::basic::SILVER,
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
-    window::WindowMode,
 };
 use bevy_live_wallpaper::LiveWallpaperPlugin;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// target monitor
+    #[arg(short, long, default_value_t = 0)]
+    target: usize,
+}
 
 fn main() {
     let mut app = App::new();
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "wayland")]
     {
-        app.add_plugins(
+        app.add_plugins((
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
@@ -23,25 +31,32 @@ fn main() {
                     exit_condition: bevy::window::ExitCondition::DontExit,
                     ..default()
                 }),
-        );
+            LiveWallpaperPlugin,
+        ));
     }
-    #[cfg(not(target_os = "linux"))]
+
+    #[cfg(target_os = "windows")]
     {
-        app.add_plugins(
+        use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
+
+        let args = Args::parse();
+        app.add_plugins((
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                        decorations: false,
                         ..default()
                     }),
                     ..default()
                 }),
-        );
+            LiveWallpaperPlugin.set(WallpaperWindowsPlugin {
+                target_monitor: WallpaperTargetMonitor::Index(args.target),
+            }),
+        ));
     }
 
-    app.add_plugins(LiveWallpaperPlugin)
-        .add_systems(Startup, setup)
+    app.add_systems(Startup, setup)
         .add_systems(Update, (rotate,))
         .run();
 }
@@ -147,7 +162,7 @@ fn setup(
         Camera3d::default(),
         Transform::from_xyz(0.0, 7., 14.0).looking_at(Vec3::new(0., 1., 0.), Vec3::Y),
     ));
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "wayland")]
     camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
 }
 

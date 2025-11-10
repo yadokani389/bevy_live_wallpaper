@@ -91,12 +91,14 @@
                 cargoTarget = rustPlatform.cargoInstallHook.targetSubdirectory;
               in
               ''
+
                 install -D target/${cargoTarget}/release/examples/3d_shapes $out/bin/3d_shapes
               '';
 
             postFixup =
               with pkgs;
               lib.optionalString stdenv.hostPlatform.isLinux ''
+
                 patchelf $out/bin/3d_shapes \
                   --add-rpath ${
                     lib.makeLibraryPath [

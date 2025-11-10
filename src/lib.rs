@@ -14,3 +14,6 @@ pub use plugin::LiveWallpaperPlugin;
 
 #[cfg(feature = "wayland")]
 pub use wayland::{LiveWallpaperCamera, surface::WaylandSurfaceHandles};
+
+#[cfg(target_os = "windows")]
+pub use windows_backend::{WallpaperTargetMonitor, WallpaperWindowsPlugin};

@@ -1,36 +1,43 @@
 use bevy::prelude::*;
-use bevy::window::WindowMode;
 use bevy_live_wallpaper::LiveWallpaperPlugin;
 
 fn main() {
     let mut app = App::new();
 
     // Platform-specific plugin setup
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "wayland")]
     {
         // On Wayland, we can't have a primary window
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: None,
-            exit_condition: bevy::window::ExitCondition::DontExit,
-            ..default()
-        }));
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        // On Windows we must start as BorderlessFullscreen so the WorkerW child covers the monitor.
-
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+        app.add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: None,
+                exit_condition: bevy::window::ExitCondition::DontExit,
                 ..default()
             }),
-            ..default()
-        }));
+            LiveWallpaperPlugin,
+        ));
     }
 
-    app.add_plugins(LiveWallpaperPlugin)
-        .add_systems(Startup, setup_scene)
-        .run();
+    #[cfg(target_os = "windows")]
+    {
+        use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
+
+        // On Windows we must start as BorderlessFullscreen so the WorkerW child covers the monitor.
+        app.add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    decorations: false,
+                    ..default()
+                }),
+                ..default()
+            }),
+            LiveWallpaperPlugin.set(WallpaperWindowsPlugin {
+                target_monitor: WallpaperTargetMonitor::Primary,
+            }),
+        ));
+    }
+
+    app.add_systems(Startup, setup_scene).run();
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -39,7 +46,7 @@ fn setup_scene(mut commands: Commands) {
 
     // On Wayland, it needs the LiveWallpaperCamera component
     // to be picked up by the plugin.
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "wayland")]
     camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
 
     // ... spawn your scene entities here ...

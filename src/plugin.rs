@@ -1,14 +1,10 @@
-use bevy::prelude::*;
+use bevy::app::plugin_group;
 
-#[derive(Default)]
-pub struct LiveWallpaperPlugin;
-
-impl Plugin for LiveWallpaperPlugin {
-    fn build(&self, app: &mut App) {
+plugin_group! {
+    pub struct LiveWallpaperPlugin{
         #[cfg(feature = "wayland")]
-        app.add_plugins(crate::wayland::backend::WaylandBackendPlugin);
-
-        #[cfg(target_os = "windows")]
-        app.add_plugins(crate::windows_backend::WindowsBackendPlugin);
+        crate::wayland::backend:::WaylandBackendPlugin,
+        #[custom(cfg(target_os = "windows"))]
+        crate::windows_backend:::WallpaperWindowsPlugin,
     }
 }
