@@ -19,6 +19,11 @@ impl Plugin for WallpaperWindowsPlugin {
     fn build(&self, app: &mut App) {
         let workerw = find_workerw().expect("workerw not found.");
         app.add_systems(Startup, attach_wallpaper_windows_system)
+            .add_systems(
+                Update,
+                update_window_position_and_size_system
+                    .run_if(resource_changed::<WallpaperTargetMonitor>),
+            )
             .insert_resource(self.target_monitor)
             .insert_non_send_resource(workerw);
     }
@@ -26,12 +31,9 @@ impl Plugin for WallpaperWindowsPlugin {
 
 fn attach_wallpaper_windows_system(
     workerw: NonSend<HWND>,
-    target_monitor: Res<WallpaperTargetMonitor>,
-    monitors: Query<&Monitor>,
-    primary_monitor: Single<&Monitor, With<PrimaryMonitor>>,
-    windows: Query<(&RawHandleWrapper, &mut Window)>,
+    handle_wrappers: Query<&RawHandleWrapper, With<Window>>,
 ) {
-    for (handle_wrapper, mut window) in windows {
+    for handle_wrapper in handle_wrappers {
         let raw_handle = handle_wrapper.get_window_handle();
 
         if let RawWindowHandle::Win32(win32_handle) = raw_handle {
@@ -51,40 +53,47 @@ fn attach_wallpaper_windows_system(
 
                 SetParent(HWND(hwnd), Some(*workerw)).expect("Failed to set parent");
             };
-
-            let Some((offset_x, offset_y)) = monitors
-                .into_iter()
-                .map(|m| (-m.physical_position.x, -m.physical_position.y))
-                .reduce(|(x0, y0), (x1, y1)| (x0.max(x1), y0.max(y1)))
-            else {
-                return;
-            };
-
-            let Some(m) = (match *target_monitor {
-                WallpaperTargetMonitor::Primary => Some(*primary_monitor),
-                WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
-                WallpaperTargetMonitor::Entity(entity) => monitors.get(entity).ok(),
-            }) else {
-                return;
-            };
-            let pos = m.physical_position;
-            let Some(scale) = monitors
-                .into_iter()
-                .map(|m| m.scale_factor as f32)
-                .reduce(f32::max)
-            else {
-                return;
-            };
-
-            window
-                .position
-                .set(ivec2(offset_x + pos.x, offset_y + pos.y));
-            window.resolution.set(
-                m.physical_width as f32 / scale,
-                m.physical_height as f32 / scale,
-            );
         }
     }
+}
+
+fn update_window_position_and_size_system(
+    target_monitor: Res<WallpaperTargetMonitor>,
+    monitors: Query<&Monitor>,
+    primary_monitor: Single<&Monitor, With<PrimaryMonitor>>,
+    mut window: Single<&mut Window>,
+) {
+    let Some((offset_x, offset_y)) = monitors
+        .into_iter()
+        .map(|m| (-m.physical_position.x, -m.physical_position.y))
+        .reduce(|(x0, y0), (x1, y1)| (x0.max(x1), y0.max(y1)))
+    else {
+        return;
+    };
+
+    let Some(m) = (match *target_monitor {
+        WallpaperTargetMonitor::Primary => Some(*primary_monitor),
+        WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
+        WallpaperTargetMonitor::Entity(entity) => monitors.get(entity).ok(),
+    }) else {
+        return;
+    };
+    let pos = m.physical_position;
+    let Some(scale) = monitors
+        .into_iter()
+        .map(|m| m.scale_factor as f32)
+        .reduce(f32::max)
+    else {
+        return;
+    };
+
+    window
+        .position
+        .set(ivec2(pos.x + offset_x, pos.y + offset_y));
+    window.resolution.set(
+        m.physical_width as f32 / scale,
+        m.physical_height as f32 / scale,
+    );
 }
 
 fn to_wide_null(s: &str) -> Vec<u16> {
