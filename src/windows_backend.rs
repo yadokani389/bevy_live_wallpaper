@@ -70,15 +70,6 @@ fn update_window_position_and_size_system(
     else {
         return;
     };
-
-    let Some(m) = (match *target_monitor {
-        WallpaperTargetMonitor::Primary => Some(*primary_monitor),
-        WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
-        WallpaperTargetMonitor::Entity(entity) => monitors.get(entity).ok(),
-    }) else {
-        return;
-    };
-    let pos = m.physical_position;
     let Some(scale) = monitors
         .into_iter()
         .map(|m| m.scale_factor as f32)
@@ -87,13 +78,46 @@ fn update_window_position_and_size_system(
         return;
     };
 
-    window
-        .position
-        .set(ivec2(pos.x + offset_x, pos.y + offset_y));
-    window.resolution.set(
-        m.physical_width as f32 / scale,
-        m.physical_height as f32 / scale,
-    );
+    let (pos_x, pos_y, width, height) = if let WallpaperTargetMonitor::All = *target_monitor {
+        let Some((max_x, max_y)) = monitors
+            .into_iter()
+            .map(|m| {
+                (
+                    m.physical_position.x + m.physical_width as i32,
+                    m.physical_position.y + m.physical_height as i32,
+                )
+            })
+            .reduce(|(x0, y0), (x1, y1)| (x0.max(x1), y0.max(y1)))
+        else {
+            return;
+        };
+        (
+            0,
+            0,
+            (max_x + offset_x) as f32 / scale,
+            (max_y + offset_y) as f32 / scale,
+        )
+    } else {
+        let Some(m) = (match *target_monitor {
+            WallpaperTargetMonitor::Primary => Some(*primary_monitor),
+            WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
+            WallpaperTargetMonitor::Entity(entity) => monitors.get(entity).ok(),
+            WallpaperTargetMonitor::All => None,
+        }) else {
+            return;
+        };
+        let pos = m.physical_position;
+
+        (
+            pos.x + offset_x,
+            pos.y + offset_y,
+            m.physical_width as f32 / scale,
+            m.physical_height as f32 / scale,
+        )
+    };
+
+    window.position.set(ivec2(pos_x, pos_y));
+    window.resolution.set(width, height);
 }
 
 fn to_wide_null(s: &str) -> Vec<u16> {
@@ -255,4 +279,6 @@ pub enum WallpaperTargetMonitor {
     Index(usize),
     /// Uses a given [`crate::monitor::Monitor`] entity.
     Entity(Entity),
+    /// Uses the all monitors as one large monitor.
+    All,
 }
