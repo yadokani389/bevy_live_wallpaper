@@ -136,6 +136,9 @@ cargo run --example=3d_shapes -- --target=0
 
 ## Credits & References
 
-- [comavius/wayggle-bg](https://github.com/comavius/wayggle-bg): Wayland
-  layer-shell setup, event dispatch structure, and general surface lifecycle
-  management informed the design of this plugin.
+- [comavius/wayggle-bg](https://github.com/comavius/wayggle-bg) — licensed under
+  the MIT License; portions of the Wayland layer-shell backend are adapted from
+  this project.
+- [ohkashi/LiveWallpaper](https://github.com/ohkashi/LiveWallpaper) — licensed
+  under the MIT License; the Windows WorkerW discovery and wallpaper lifecycle
+  logic are adapted from this project.

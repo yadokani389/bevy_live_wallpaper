@@ -1,13 +1,14 @@
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, RawHandleWrapper};
 use raw_window_handle::RawWindowHandle;
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, FindWindowW, GWL_STYLE, GetWindowLongW, SEND_MESSAGE_TIMEOUT_FLAGS,
-    SendMessageTimeoutW, SetParent, SetWindowLongW, WS_CHILD, WS_OVERLAPPED, WS_POPUP,
+    EnumChildWindows, EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GWL_STYLE,
+    GetClassNameW, GetWindowLongW, PostMessageW, SEND_MESSAGE_TIMEOUT_FLAGS, SendMessageTimeoutW,
+    SetParent, SetWindowLongW, WM_CLOSE, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_OVERLAPPED, WS_POPUP,
 };
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR};
 
 #[derive(Default)]
 pub struct WallpaperWindowsPlugin {
@@ -16,27 +17,7 @@ pub struct WallpaperWindowsPlugin {
 
 impl Plugin for WallpaperWindowsPlugin {
     fn build(&self, app: &mut App) {
-        let workerw = unsafe {
-            let progman = FindWindowW(PCWSTR(to_wide_null("Progman").as_ptr()), None)
-                .expect("Progman not found.");
-            SendMessageTimeoutW(
-                progman,
-                0x052C,
-                WPARAM(0),
-                LPARAM(0),
-                SEND_MESSAGE_TIMEOUT_FLAGS(0),
-                1000,
-                None,
-            );
-
-            FindWindowExW(
-                Some(progman),
-                None,
-                PCWSTR(to_wide_null("WorkerW").as_ptr()),
-                None,
-            )
-            .expect("workerw not found.")
-        };
+        let workerw = find_workerw().expect("workerw not found.");
         app.add_systems(Startup, attach_wallpaper_windows_system)
             .insert_resource(self.target_monitor)
             .insert_non_send_resource(workerw);
@@ -56,10 +37,17 @@ fn attach_wallpaper_windows_system(
         if let RawWindowHandle::Win32(win32_handle) = raw_handle {
             let hwnd = win32_handle.hwnd.get() as *mut std::ffi::c_void;
 
+            close_duplicate_instances(*workerw, HWND(hwnd));
+
             unsafe {
                 let current_style = GetWindowLongW(HWND(hwnd), GWL_STYLE) as u32;
                 let new_style = (current_style & !(WS_POPUP.0 | WS_OVERLAPPED.0)) | WS_CHILD.0;
                 SetWindowLongW(HWND(hwnd), GWL_STYLE, new_style as i32);
+
+                let current_ex_style = GetWindowLongW(HWND(hwnd), GWL_EXSTYLE) as u32;
+                let cleared = current_ex_style & !WS_EX_APPWINDOW.0;
+                let ex_style = cleared | WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0;
+                SetWindowLongW(HWND(hwnd), GWL_EXSTYLE, ex_style as i32);
 
                 SetParent(HWND(hwnd), Some(*workerw)).expect("Failed to set parent");
             };
@@ -101,6 +89,152 @@ fn attach_wallpaper_windows_system(
 
 fn to_wide_null(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn find_workerw() -> Option<HWND> {
+    let progman = unsafe { FindWindowW(PCWSTR(to_wide_null("Progman").as_ptr()), None).ok()? };
+    unsafe {
+        let _ = SendMessageTimeoutW(
+            progman,
+            0x052C,
+            WPARAM(0),
+            LPARAM(0),
+            SEND_MESSAGE_TIMEOUT_FLAGS(0),
+            1000,
+            None,
+        );
+    }
+
+    find_workerw_for_progman(progman).or_else(find_workerw_from_desktop)
+}
+
+fn find_workerw_for_progman(progman: HWND) -> Option<HWND> {
+    let mut state = WorkerFinder::default();
+    unsafe {
+        _ = EnumChildWindows(
+            Some(progman),
+            Some(enum_child_worker_proc),
+            LPARAM(&mut state as *mut _ as isize),
+        );
+    }
+    state.worker
+}
+
+fn find_workerw_from_desktop() -> Option<HWND> {
+    let mut state = WorkerFinder::default();
+    unsafe {
+        _ = EnumWindows(
+            Some(enum_windows_worker_proc),
+            LPARAM(&mut state as *mut _ as isize),
+        );
+    }
+    state.worker
+}
+
+#[derive(Default)]
+struct WorkerFinder {
+    worker: Option<HWND>,
+}
+
+unsafe extern "system" fn enum_child_worker_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = unsafe { &mut *(lparam.0 as *mut WorkerFinder) };
+    if state.worker.is_some() {
+        return BOOL(0);
+    }
+    if is_class(hwnd, "WorkerW") {
+        state.worker = Some(hwnd);
+        return BOOL(0);
+    }
+    BOOL(1)
+}
+
+unsafe extern "system" fn enum_windows_worker_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = unsafe { &mut *(lparam.0 as *mut WorkerFinder) };
+    if state.worker.is_some() {
+        return BOOL(0);
+    }
+
+    let shell = unsafe {
+        FindWindowExW(
+            Some(hwnd),
+            None,
+            PCWSTR(to_wide_null("SHELLDLL_DefView").as_ptr()),
+            None,
+        )
+    };
+    if shell.is_err() {
+        return BOOL(1);
+    }
+
+    let worker = unsafe {
+        FindWindowExW(
+            None,
+            Some(hwnd),
+            PCWSTR(to_wide_null("WorkerW").as_ptr()),
+            None,
+        )
+    };
+    if let Ok(worker) = worker {
+        state.worker = Some(worker);
+        return BOOL(0);
+    }
+
+    BOOL(1)
+}
+
+fn is_class(hwnd: HWND, class: &str) -> bool {
+    let target: Vec<u16> = class.encode_utf16().collect();
+    window_class_utf16(hwnd)
+        .map(|name| name == target)
+        .unwrap_or(false)
+}
+
+fn window_class_utf16(hwnd: HWND) -> Option<Vec<u16>> {
+    unsafe {
+        let mut buffer = [0u16; 256];
+        let len = GetClassNameW(hwnd, &mut buffer);
+        if len == 0 {
+            return None;
+        }
+        Some(buffer[..len as usize].to_vec())
+    }
+}
+
+fn close_duplicate_instances(workerw: HWND, current_hwnd: HWND) {
+    let Some(class_name) = window_class_utf16(current_hwnd) else {
+        return;
+    };
+    let mut state = DuplicateCleanupState {
+        class_name,
+        current: current_hwnd,
+    };
+    unsafe {
+        _ = EnumChildWindows(
+            Some(workerw),
+            Some(enum_duplicate_cleanup_proc),
+            LPARAM(&mut state as *mut _ as isize),
+        );
+    }
+}
+
+struct DuplicateCleanupState {
+    class_name: Vec<u16>,
+    current: HWND,
+}
+
+unsafe extern "system" fn enum_duplicate_cleanup_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let state = unsafe { &*(lparam.0 as *mut DuplicateCleanupState) };
+    if hwnd == state.current {
+        return BOOL(1);
+    }
+    if let Some(class_name) = window_class_utf16(hwnd)
+        && class_name == state.class_name
+    {
+        unsafe {
+            _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+    BOOL(1)
 }
 
 #[derive(Default, Clone, Copy, Resource)]
