@@ -1,5 +1,7 @@
 # Bevy Live Wallpaper
 
+![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)
+
 A [Bevy](https://bevyengine.org/) plugin that renders your scene into a Wayland
 layer-shell surface or a Windows desktop background.
 
@@ -15,16 +17,7 @@ layer-shell surface or a Windows desktop background.
   Hyprland, River).
 - **Windows**: The standard desktop environment.
 
-## Features
-
-The crate provides two platform-specific backends:
-
-- **`wayland`** (feature): For Linux/BSD, integrates with Wayland compositors
-  using the `zwlr_layer_shell_v1` protocol.
-- **Windows**: For Windows, integrates with the desktop by parenting the Bevy
-  window to the `WorkerW` wallpaper window.
-
-### Configuration
+## Configuration
 
 - On **Windows**, the appropriate backend is selected automatically. No features
   need to be enabled.
@@ -133,6 +126,12 @@ nix run github:yadokani389/bevy_live_wallpaper -- --target=0
 ```sh
 cargo run --example=3d_shapes -- --target=0
 ```
+
+## Known Issues
+
+- On Windows, with Intel integrated graphics, the Vulkan backend may not work
+  for setting the desktop background. In such cases, it is necessary to use the
+  DX12 backend.
 
 ## Credits & References
 
