@@ -1,3 +1,6 @@
+//! This example demonstrates how to change the target monitor
+//! This only works on Windows
+
 use bevy::prelude::*;
 use bevy_live_wallpaper::LiveWallpaperPlugin;
 use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
