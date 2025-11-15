@@ -21,7 +21,7 @@ struct Args {
 
 fn main() {
     let mut app = App::new();
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     {
         app.add_plugins((
             DefaultPlugins
@@ -162,7 +162,7 @@ fn setup(
         Camera3d::default(),
         Transform::from_xyz(0.0, 7., 14.0).looking_at(Vec3::new(0., 1., 0.), Vec3::Y),
     ));
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
 }
 

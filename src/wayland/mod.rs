@@ -12,11 +12,6 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 
 use self::surface::WaylandSurfaceHandles;
 
-/// Marks a camera whose output should be redirected to the Wayland background surface.
-/// This component is only used on Wayland.
-#[derive(Component, Default)]
-pub struct LiveWallpaperCamera;
-
 #[derive(Resource)]
 pub struct WaylandAppState {
     pub closed: bool,

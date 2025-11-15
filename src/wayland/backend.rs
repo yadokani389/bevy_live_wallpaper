@@ -9,7 +9,7 @@ use bevy::{
 use wayland_client::{Connection, EventQueue};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-use super::LiveWallpaperCamera;
+use crate::LiveWallpaperCamera;
 
 use super::{
     WaylandAppState,

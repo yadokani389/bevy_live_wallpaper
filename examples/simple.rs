@@ -5,9 +5,9 @@ fn main() {
     let mut app = App::new();
 
     // Platform-specific plugin setup
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     {
-        // On Wayland, we can't have a primary window
+        // On Wayland/X11 we can't have a Bevy-managed window
         app.add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: None,
@@ -44,9 +44,9 @@ fn setup_scene(mut commands: Commands) {
     // Spawn a camera.
     let mut camera = commands.spawn(Camera2d);
 
-    // On Wayland, it needs the LiveWallpaperCamera component
+    // On Wayland/X11 it needs the LiveWallpaperCamera component
     // to be picked up by the plugin.
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
 
     // ... spawn your scene entities here ...
