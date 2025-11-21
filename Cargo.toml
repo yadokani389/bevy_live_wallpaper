@@ -8,6 +8,7 @@ wayland = [
   "dep:wayland-backend",
   "dep:wayland-client",
   "dep:wayland-protocols-wlr",
+  "dep:wayland-protocols",
   "dep:wgpu",
 ]
 x11 = ["dep:as-raw-xcb-connection", "dep:x11rb", "dep:wgpu"]
@@ -27,6 +28,10 @@ wayland-backend = { version = "0.3.11", features = [
   "client_system",
 ], optional = true }
 wayland-client = { version = "0.31.11", optional = true }
+wayland-protocols = { version = "0.32.9", features = [
+  "client",
+  "unstable",
+], optional = true }
 wayland-protocols-wlr = { version = "0.3.8", features = [
   "client",
 ], optional = true }

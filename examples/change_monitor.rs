@@ -1,25 +1,29 @@
-//! This example demonstrates how to change the target monitor
-//! This only works on Windows
+//! Change the target monitor at runtime.
+//! Works on Windows and Wayland (with the `wayland` feature).
 
 use bevy::prelude::*;
-use bevy_live_wallpaper::LiveWallpaperPlugin;
-use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
+use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperTargetMonitor};
 
 fn main() {
     let mut app = App::new();
 
-    app.add_plugins((
-        DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                decorations: false,
-                ..default()
-            }),
+    #[cfg(feature = "wayland")]
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: None,
+        exit_condition: bevy::window::ExitCondition::DontExit,
+        ..default()
+    }));
+
+    #[cfg(target_os = "windows")]
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            decorations: false,
             ..default()
         }),
-        LiveWallpaperPlugin.set(WallpaperWindowsPlugin {
-            target_monitor: WallpaperTargetMonitor::Primary,
-        }),
-    ));
+        ..default()
+    }));
+
+    app.add_plugins(LiveWallpaperPlugin::default());
 
     app.add_systems(Startup, setup_scene)
         .add_systems(Update, change_monitor)
@@ -27,7 +31,9 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    let mut camera = commands.spawn(Camera2d);
+    #[cfg(feature = "wayland")]
+    camera.insert(LiveWallpaperCamera);
 
     commands.spawn((
         Sprite::from_color(Color::srgb(0.15, 0.4, 0.85), Vec2::splat(1600.0)),
@@ -40,9 +46,11 @@ fn change_monitor(
     mut has_run: Local<bool>,
     time: Res<Time>,
 ) {
+    // Switch after 5 seconds once.
     if *has_run || time.elapsed_secs() < 5.0 {
         return;
     }
     *has_run = true;
-    *wallpaper_target = WallpaperTargetMonitor::Index(1);
+
+    *wallpaper_target = WallpaperTargetMonitor::All;
 }

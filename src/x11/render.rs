@@ -19,7 +19,7 @@ use crate::x11::surface::X11SurfaceHandles;
 
 pub const X11_SURFACE_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
 
-pub fn create_x11_image(images: &mut Assets<Image>) -> Handle<Image> {
+pub(crate) fn create_x11_image(images: &mut Assets<Image>) -> Handle<Image> {
     let size = Extent3d {
         width: 1,
         height: 1,
@@ -38,7 +38,7 @@ pub fn create_x11_image(images: &mut Assets<Image>) -> Handle<Image> {
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
-pub struct X11SurfaceDescriptor {
+pub(crate) struct X11SurfaceDescriptor {
     pub handles: Option<X11SurfaceHandles>,
     pub width: u32,
     pub height: u32,
@@ -46,7 +46,7 @@ pub struct X11SurfaceDescriptor {
 }
 
 impl X11SurfaceDescriptor {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             handles: None,
             width: 0,
@@ -55,19 +55,19 @@ impl X11SurfaceDescriptor {
         }
     }
 
-    pub fn bump_generation(&mut self) {
+    pub(crate) fn bump_generation(&mut self) {
         self.generation = self.generation.wrapping_add(1);
     }
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug)]
-pub struct X11RenderTarget {
+pub(crate) struct X11RenderTarget {
     pub image: Handle<Image>,
     pub last_applied_generation: u64,
 }
 
 impl X11RenderTarget {
-    pub fn new(image: Handle<Image>) -> Self {
+    pub(crate) fn new(image: Handle<Image>) -> Self {
         Self {
             image,
             last_applied_generation: 0,
@@ -76,21 +76,21 @@ impl X11RenderTarget {
 }
 
 #[derive(Resource, Default)]
-pub struct X11GpuSurfaceState {
+pub(crate) struct X11GpuSurfaceState {
     pub surface: Option<wgpu::Surface<'static>>,
     pub config: Option<SurfaceConfiguration>,
     pub last_applied_generation: u64,
 }
 
 impl X11GpuSurfaceState {
-    pub fn mark_stale(&mut self) {
+    pub(crate) fn mark_stale(&mut self) {
         self.surface = None;
         self.config = None;
         self.last_applied_generation = 0;
     }
 }
 
-pub fn prepare_x11_surface(
+pub(crate) fn prepare_x11_surface(
     descriptor: Res<X11SurfaceDescriptor>,
     mut state: ResMut<X11GpuSurfaceState>,
     render_instance: Res<RenderInstance>,
@@ -195,7 +195,7 @@ pub fn prepare_x11_surface(
     state.last_applied_generation = descriptor.generation;
 }
 
-pub fn present_x11_surface(
+pub(crate) fn present_x11_surface(
     mut state: ResMut<X11GpuSurfaceState>,
     target: Option<Res<X11RenderTarget>>,
     images: Res<RenderAssets<GpuImage>>,

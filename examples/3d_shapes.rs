@@ -8,7 +8,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use bevy_live_wallpaper::LiveWallpaperPlugin;
+use bevy_live_wallpaper::{LiveWallpaperPlugin, WallpaperTargetMonitor};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -21,9 +21,11 @@ struct Args {
 
 fn main() {
     let mut app = App::new();
+    let args = Args::parse();
+
     #[cfg(any(feature = "wayland", feature = "x11"))]
     {
-        app.add_plugins((
+        app.add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
@@ -31,16 +33,13 @@ fn main() {
                     exit_condition: bevy::window::ExitCondition::DontExit,
                     ..default()
                 }),
-            LiveWallpaperPlugin,
-        ));
+        );
     }
 
     #[cfg(target_os = "windows")]
     {
-        use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
-
         let args = Args::parse();
-        app.add_plugins((
+        app.add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
@@ -50,11 +49,12 @@ fn main() {
                     }),
                     ..default()
                 }),
-            LiveWallpaperPlugin.set(WallpaperWindowsPlugin {
-                target_monitor: WallpaperTargetMonitor::Index(args.target),
-            }),
-        ));
+        );
     }
+
+    app.add_plugins(LiveWallpaperPlugin {
+        target_monitor: WallpaperTargetMonitor::Index(args.target),
+    });
 
     app.add_systems(Startup, setup)
         .add_systems(Update, (rotate,))

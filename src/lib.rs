@@ -8,12 +8,13 @@ compile_error!("On non-Windows platforms, either the 'wayland' or 'x11' feature 
 
 pub mod camera;
 pub mod plugin;
+pub mod target_monitor;
 
 #[cfg(feature = "wayland")]
-pub mod wayland;
+pub(crate) mod wayland;
 
 #[cfg(feature = "x11")]
-pub mod x11;
+pub(crate) mod x11;
 
 #[cfg(target_os = "windows")]
 mod windows_backend;
@@ -21,12 +22,10 @@ mod windows_backend;
 pub use plugin::LiveWallpaperPlugin;
 
 pub use camera::LiveWallpaperCamera;
+pub use target_monitor::WallpaperTargetMonitor;
 
 #[cfg(feature = "wayland")]
 pub use wayland::surface::WaylandSurfaceHandles;
 
 #[cfg(feature = "x11")]
 pub use x11::surface::X11SurfaceHandles;
-
-#[cfg(target_os = "windows")]
-pub use windows_backend::{WallpaperTargetMonitor, WallpaperWindowsPlugin};

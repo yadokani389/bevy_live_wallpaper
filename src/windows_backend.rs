@@ -1,3 +1,4 @@
+use crate::WallpaperTargetMonitor;
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, RawHandleWrapper};
 use raw_window_handle::RawWindowHandle;
@@ -11,9 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR};
 
 #[derive(Default)]
-pub struct WallpaperWindowsPlugin {
-    pub target_monitor: WallpaperTargetMonitor,
-}
+pub(crate) struct WallpaperWindowsPlugin;
 
 impl Plugin for WallpaperWindowsPlugin {
     fn build(&self, app: &mut App) {
@@ -24,7 +23,6 @@ impl Plugin for WallpaperWindowsPlugin {
                 update_window_position_and_size_system
                     .run_if(resource_changed::<WallpaperTargetMonitor>),
             )
-            .insert_resource(self.target_monitor)
             .insert_non_send_resource(workerw);
     }
 }
@@ -101,7 +99,6 @@ fn update_window_position_and_size_system(
         let Some(m) = (match *target_monitor {
             WallpaperTargetMonitor::Primary => Some(*primary_monitor),
             WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
-            WallpaperTargetMonitor::Entity(entity) => monitors.get(entity).ok(),
             WallpaperTargetMonitor::All => None,
         }) else {
             return;
@@ -268,17 +265,4 @@ unsafe extern "system" fn enum_duplicate_cleanup_proc(hwnd: HWND, lparam: LPARAM
         }
     }
     BOOL(1)
-}
-
-#[derive(Default, Clone, Copy, Resource)]
-pub enum WallpaperTargetMonitor {
-    /// Uses the primary monitor of the system.
-    #[default]
-    Primary,
-    /// Uses the monitor with the specified index.
-    Index(usize),
-    /// Uses a given [`crate::monitor::Monitor`] entity.
-    Entity(Entity),
-    /// Uses the all monitors as one large monitor.
-    All,
 }

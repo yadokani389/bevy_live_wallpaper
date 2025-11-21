@@ -20,7 +20,7 @@ use x11rb::{
 
 use self::surface::X11SurfaceHandles;
 
-pub struct X11AppState {
+pub(crate) struct X11AppState {
     connection: XCBConnection,
     root_window: u32,
     screen: c_int,
@@ -29,7 +29,7 @@ pub struct X11AppState {
 }
 
 impl X11AppState {
-    pub fn connect() -> Result<(Self, X11SurfaceConfig), String> {
+    pub(crate) fn connect() -> Result<(Self, X11SurfaceConfig), String> {
         let (connection, screen_index) = XCBConnection::connect(None)
             .map_err(|err| format!("Failed to connect to X11: {err}"))?;
 
@@ -94,19 +94,19 @@ impl X11AppState {
         }
     }
 
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         !self.closed
     }
 
-    pub fn queue_surface_config(&mut self, config: X11SurfaceConfig) {
+    pub(crate) fn queue_surface_config(&mut self, config: X11SurfaceConfig) {
         self.pending_surface_config = Some(config);
     }
 
-    pub fn take_surface_config(&mut self) -> Option<X11SurfaceConfig> {
+    pub(crate) fn take_surface_config(&mut self) -> Option<X11SurfaceConfig> {
         self.pending_surface_config.take()
     }
 
-    pub fn poll_events(&mut self) {
+    pub(crate) fn poll_events(&mut self) {
         loop {
             match self.connection.poll_for_event() {
                 Ok(Some(Event::ConfigureNotify(event))) => {
@@ -136,7 +136,7 @@ impl X11AppState {
 }
 
 #[derive(Clone, Copy)]
-pub struct X11SurfaceConfig {
+pub(crate) struct X11SurfaceConfig {
     pub handles: X11SurfaceHandles,
     pub width: u32,
     pub height: u32,

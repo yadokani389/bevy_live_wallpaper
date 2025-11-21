@@ -65,34 +65,26 @@ fn main() {
     #[cfg(any(feature = "wayland", feature = "x11"))]
     {
         // On Wayland/X11, we can't have a primary window
-        app.add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            }),
-            LiveWallpaperPlugin,
-        ));
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: None,
+            exit_condition: bevy::window::ExitCondition::DontExit,
+            ..default()
+        }));
     }
 
     #[cfg(target_os = "windows")]
     {
-        use bevy_live_wallpaper::{WallpaperTargetMonitor, WallpaperWindowsPlugin};
-
         // On Windows we must start as BorderlessFullscreen so the WorkerW child covers the monitor.
-        app.add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    decorations: false,
-                    ..default()
-                }),
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                decorations: false,
                 ..default()
             }),
-            LiveWallpaperPlugin.set(WallpaperWindowsPlugin {
-                target_monitor: WallpaperTargetMonitor::Primary,
-            }),
-        ));
+            ..default()
+        }));
     }
+
+    app.add_plugins(LiveWallpaperPlugin::default());
 
     app.add_systems(Startup, setup_scene).run();
 }
