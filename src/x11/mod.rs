@@ -9,6 +9,8 @@ use std::{
 
 use as_raw_xcb_connection::AsRawXcbConnection;
 use bevy::prelude::*;
+use x11rb::COPY_DEPTH_FROM_PARENT;
+use x11rb::protocol::randr::{self, ConnectionExt as RandrConnectionExt, MonitorInfo};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -20,16 +22,24 @@ use x11rb::{
 
 use self::surface::X11SurfaceHandles;
 
+use crate::WallpaperTargetMonitor;
+
 pub(crate) struct X11AppState {
     connection: XCBConnection,
     root_window: u32,
+    wallpaper_window: u32,
     screen: c_int,
     closed: bool,
+    target: WallpaperTargetMonitor,
+    monitors: Vec<MonitorRect>,
+    monitors_dirty: bool,
     pending_surface_config: Option<X11SurfaceConfig>,
 }
 
 impl X11AppState {
-    pub(crate) fn connect() -> Result<(Self, X11SurfaceConfig), String> {
+    pub(crate) fn connect(
+        target: WallpaperTargetMonitor,
+    ) -> Result<(Self, X11SurfaceConfig), String> {
         let (connection, screen_index) = XCBConnection::connect(None)
             .map_err(|err| format!("Failed to connect to X11: {err}"))?;
 
@@ -41,6 +51,7 @@ impl X11AppState {
         let root_window = screen.root;
         let screen_width = u32::from(screen.width_in_pixels);
         let screen_height = u32::from(screen.height_in_pixels);
+        let root_visual = screen.root_visual;
         let screen_id = screen_index as c_int;
 
         connection
@@ -52,28 +63,48 @@ impl X11AppState {
             .check()
             .map_err(|err| format!("Failed to select root window events: {err:?}"))?;
 
+        // Subscribe to RandR notifications (monitor hotplug/resize).
+        connection
+            .randr_select_input(
+                root_window,
+                randr::NotifyMask::CRTC_CHANGE
+                    | randr::NotifyMask::OUTPUT_CHANGE
+                    | randr::NotifyMask::SCREEN_CHANGE,
+            )
+            .map_err(|err| format!("Failed to select RandR input: {err:?}"))?;
+
         connection
             .flush()
             .map_err(|err| format!("Failed to flush X11 connection: {err:?}"))?;
 
-        let config = Self::create_surface_config(
-            &connection,
+        let mut state = Self {
+            connection,
             root_window,
+            wallpaper_window: 0,
+            screen: screen_id,
+            closed: false,
+            target,
+            monitors: Vec::new(),
+            monitors_dirty: true,
+            pending_surface_config: None,
+        };
+
+        state.refresh_monitors()?;
+        state.create_or_update_wallpaper_window(root_visual)?;
+        state.monitors_dirty = false;
+
+        // Initial surface config uses current wallpaper window size.
+        let config = Self::create_surface_config(
+            &state.connection,
+            state.wallpaper_window,
             screen_id,
-            screen_width,
-            screen_height,
+            state.current_width().unwrap_or(screen_width),
+            state.current_height().unwrap_or(screen_height),
         );
 
-        Ok((
-            Self {
-                connection,
-                root_window,
-                screen: screen_id,
-                closed: false,
-                pending_surface_config: Some(config),
-            },
-            config,
-        ))
+        state.pending_surface_config = Some(config);
+
+        Ok((state, config))
     }
 
     fn create_surface_config(
@@ -94,6 +125,14 @@ impl X11AppState {
         }
     }
 
+    fn current_width(&self) -> Option<u32> {
+        self.monitor_for(self.target).map(|rect| rect.width as u32)
+    }
+
+    fn current_height(&self) -> Option<u32> {
+        self.monitor_for(self.target).map(|rect| rect.height as u32)
+    }
+
     pub(crate) fn is_running(&self) -> bool {
         !self.closed
     }
@@ -110,18 +149,21 @@ impl X11AppState {
         loop {
             match self.connection.poll_for_event() {
                 Ok(Some(Event::ConfigureNotify(event))) => {
-                    if event.window == self.root_window {
+                    if event.window == self.wallpaper_window {
                         let width = u32::from(event.width.max(1));
                         let height = u32::from(event.height.max(1));
                         let config = Self::create_surface_config(
                             &self.connection,
-                            self.root_window,
+                            self.wallpaper_window,
                             self.screen,
                             width,
                             height,
                         );
                         self.queue_surface_config(config);
                     }
+                }
+                Ok(Some(Event::RandrNotify(_))) | Ok(Some(Event::RandrScreenChangeNotify(_))) => {
+                    self.monitors_dirty = true;
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => break,
@@ -132,6 +174,136 @@ impl X11AppState {
                 }
             }
         }
+
+        if self.monitors_dirty && !self.closed {
+            if let Err(err) = self.refresh_monitors() {
+                warn!("Failed to refresh RandR monitors: {err}");
+            } else if let Err(err) = self.apply_target(self.target) {
+                warn!("Failed to apply target monitor after RandR change: {err}");
+            }
+            self.monitors_dirty = false;
+        }
+    }
+
+    pub(crate) fn apply_target(&mut self, target: WallpaperTargetMonitor) -> Result<(), String> {
+        let Some(rect) = self.monitor_for(target) else {
+            return Err("No monitors available for selected target".into());
+        };
+
+        self.target = target;
+
+        // Move/resize wallpaper window to selected monitor bounds.
+        let aux = x11rb::protocol::xproto::ConfigureWindowAux::new()
+            .x(i32::from(rect.x))
+            .y(i32::from(rect.y))
+            .width(rect.width as u32)
+            .height(rect.height as u32)
+            .stack_mode(x11rb::protocol::xproto::StackMode::BELOW);
+        self.connection
+            .configure_window(self.wallpaper_window, &aux)
+            .map_err(|err| format!("Failed to configure wallpaper window: {err:?}"))?
+            .check()
+            .map_err(|err| format!("Failed to configure wallpaper window: {err:?}"))?;
+        self.connection
+            .flush()
+            .map_err(|err| format!("Failed to flush wallpaper configure: {err:?}"))?;
+
+        let config = Self::create_surface_config(
+            &self.connection,
+            self.wallpaper_window,
+            self.screen,
+            rect.width as u32,
+            rect.height as u32,
+        );
+        self.queue_surface_config(config);
+        Ok(())
+    }
+
+    fn refresh_monitors(&mut self) -> Result<(), String> {
+        let reply = self
+            .connection
+            .randr_get_monitors(self.root_window, true)
+            .map_err(|err| format!("Failed to request RandR monitors: {err:?}"))?
+            .reply()
+            .map_err(|err| format!("Failed to read RandR monitors reply: {err:?}"))?;
+
+        self.monitors = reply.monitors.into_iter().map(MonitorRect::from).collect();
+        Ok(())
+    }
+
+    fn monitor_for(&self, target: WallpaperTargetMonitor) -> Option<MonitorRect> {
+        match target {
+            WallpaperTargetMonitor::All => MonitorRect::bounding(&self.monitors),
+            WallpaperTargetMonitor::Primary => self
+                .monitors
+                .iter()
+                .find(|m| m.primary)
+                .or_else(|| self.monitors.first())
+                .copied(),
+            WallpaperTargetMonitor::Index(n) => self.monitors.get(n).copied(),
+        }
+    }
+
+    fn create_or_update_wallpaper_window(&mut self, visual: u32) -> Result<(), String> {
+        if self.monitors.is_empty() {
+            return Err("No monitors reported by RandR; cannot create wallpaper window".into());
+        }
+
+        let rect = self
+            .monitor_for(self.target)
+            .unwrap_or_else(|| self.monitors[0]);
+
+        if self.wallpaper_window == 0 {
+            let window = self
+                .connection
+                .generate_id()
+                .map_err(|err| format!("Failed to generate window id: {err:?}"))?;
+
+            let aux = x11rb::protocol::xproto::CreateWindowAux::new()
+                .event_mask(EventMask::STRUCTURE_NOTIFY)
+                .override_redirect(1)
+                .background_pixel(0)
+                .border_pixel(0);
+
+            self.connection
+                .create_window(
+                    COPY_DEPTH_FROM_PARENT,
+                    window,
+                    self.root_window,
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    0,
+                    x11rb::protocol::xproto::WindowClass::INPUT_OUTPUT,
+                    visual,
+                    &aux,
+                )
+                .map_err(|err| format!("Failed to create wallpaper window: {err:?}"))?
+                .check()
+                .map_err(|err| format!("Failed to create wallpaper window: {err:?}"))?;
+
+            // Place behind other windows.
+            let config_aux = x11rb::protocol::xproto::ConfigureWindowAux::new()
+                .stack_mode(x11rb::protocol::xproto::StackMode::BELOW);
+            self.connection
+                .configure_window(window, &config_aux)
+                .map_err(|err| format!("Failed to lower wallpaper window: {err:?}"))?
+                .check()
+                .map_err(|err| format!("Failed to lower wallpaper window: {err:?}"))?;
+
+            self.connection
+                .map_window(window)
+                .map_err(|err| format!("Failed to map wallpaper window: {err:?}"))?
+                .check()
+                .map_err(|err| format!("Failed to map wallpaper window: {err:?}"))?;
+
+            self.wallpaper_window = window;
+        } else {
+            self.apply_target(self.target)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -140,4 +312,52 @@ pub(crate) struct X11SurfaceConfig {
     pub handles: X11SurfaceHandles,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MonitorRect {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    primary: bool,
+}
+
+impl MonitorRect {
+    fn bounding(monitors: &[Self]) -> Option<Self> {
+        let mut iter = monitors.iter();
+        let first = iter.next().copied()?;
+
+        let mut min_x = first.x as i32;
+        let mut min_y = first.y as i32;
+        let mut max_x = first.x as i32 + first.width as i32;
+        let mut max_y = first.y as i32 + first.height as i32;
+
+        for m in iter {
+            min_x = min_x.min(m.x as i32);
+            min_y = min_y.min(m.y as i32);
+            max_x = max_x.max(m.x as i32 + m.width as i32);
+            max_y = max_y.max(m.y as i32 + m.height as i32);
+        }
+
+        Some(Self {
+            x: min_x as i16,
+            y: min_y as i16,
+            width: (max_x - min_x) as u16,
+            height: (max_y - min_y) as u16,
+            primary: false,
+        })
+    }
+}
+
+impl From<MonitorInfo> for MonitorRect {
+    fn from(m: MonitorInfo) -> Self {
+        Self {
+            x: m.x,
+            y: m.y,
+            width: m.width,
+            height: m.height,
+            primary: m.primary,
+        }
+    }
 }

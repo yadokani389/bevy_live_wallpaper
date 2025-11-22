@@ -7,7 +7,7 @@ use bevy::{
     },
 };
 
-use crate::LiveWallpaperCamera;
+use crate::{LiveWallpaperCamera, WallpaperTargetMonitor};
 
 use super::{
     X11AppState,
@@ -22,12 +22,18 @@ pub(crate) struct X11BackendPlugin;
 
 impl Plugin for X11BackendPlugin {
     fn build(&self, app: &mut App) {
-        let (app_state, initial_config) =
-            X11AppState::connect().expect("failed to initialize X11 wallpaper backend");
+        let target_monitor = app
+            .world()
+            .get_resource::<WallpaperTargetMonitor>()
+            .copied()
+            .unwrap_or_default();
+
+        let (app_state, initial_config) = X11AppState::connect(target_monitor)
+            .expect("failed to initialize X11 wallpaper backend");
 
         info!(
-            "Connected to X11 root window: {}x{}",
-            initial_config.width, initial_config.height
+            "Connected to X11 wallpaper window: {}x{} (target: {:?})",
+            initial_config.width, initial_config.height, target_monitor
         );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -68,12 +74,19 @@ impl Plugin for X11BackendPlugin {
 fn x11_event_system(
     mut app_state: NonSendMut<X11AppState>,
     mut surface_descriptor: ResMut<X11SurfaceDescriptor>,
+    target_monitor: Res<WallpaperTargetMonitor>,
 ) {
     if !app_state.is_running() {
         return;
     }
 
     app_state.poll_events();
+
+    if target_monitor.is_changed()
+        && let Err(err) = app_state.apply_target(*target_monitor)
+    {
+        warn!("Failed to apply target monitor change: {err}");
+    }
 
     if let Some(surface_config) = app_state.take_surface_config() {
         info!(

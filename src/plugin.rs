@@ -4,9 +4,8 @@ use crate::WallpaperTargetMonitor;
 
 /// Main plugin to run the live wallpaper.
 ///
-/// `target_monitor` controls which monitor(s) to use. It is honored by the
-/// Wayland / Windows backends. X11 backend currently ignores this selection
-/// (no multi-monitor targeting implemented there yet).
+/// `target_monitor` controls which monitor(s) to use across all backends:
+/// Wayland, X11 (RandR), and Windows.
 #[derive(Default)]
 pub struct LiveWallpaperPlugin {
     pub target_monitor: WallpaperTargetMonitor,

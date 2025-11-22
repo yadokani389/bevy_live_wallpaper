@@ -7,7 +7,7 @@ use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperTar
 fn main() {
     let mut app = App::new();
 
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: None,
         exit_condition: bevy::window::ExitCondition::DontExit,
@@ -32,7 +32,7 @@ fn main() {
 
 fn setup_scene(mut commands: Commands) {
     let mut camera = commands.spawn(Camera2d);
-    #[cfg(feature = "wayland")]
+    #[cfg(any(feature = "wayland", feature = "x11"))]
     camera.insert(LiveWallpaperCamera);
 
     commands.spawn((

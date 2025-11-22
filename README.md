@@ -15,6 +15,8 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 - **Wayland**: A compositor that advertises `zwlr_layer_shell_v1` (e.g. Sway,
   Hyprland, River).
+- **X11**: An X server with the RandR extension enabled (standard on modern
+  desktops).
 - **Windows**: The standard desktop environment.
 
 ## Configuration
