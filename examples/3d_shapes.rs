@@ -17,6 +17,8 @@ struct Args {
     /// target monitor
     #[arg(short, long, default_value_t = 0)]
     target: usize,
+    #[arg(short, long)]
+    all: bool,
 }
 
 fn main() {
@@ -38,7 +40,6 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        let args = Args::parse();
         app.add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
@@ -53,7 +54,11 @@ fn main() {
     }
 
     app.add_plugins(LiveWallpaperPlugin {
-        target_monitor: WallpaperTargetMonitor::Index(args.target),
+        target_monitor: if args.all {
+            WallpaperTargetMonitor::All
+        } else {
+            WallpaperTargetMonitor::Index(args.target)
+        },
     });
 
     app.add_systems(Startup, setup)
