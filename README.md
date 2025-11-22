@@ -124,6 +124,8 @@ nix run github:yadokani389/bevy_live_wallpaper -- --target=0
 
 ```sh
 cargo run --features=x11 --example=3d_shapes -- --target=0
+# or
+nix run github:yadokani389/bevy_live_wallpaper#x11 -- --all
 ```
 
 - **Run on Windows:**
