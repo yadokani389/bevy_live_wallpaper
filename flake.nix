@@ -27,8 +27,6 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
 
       imports = with inputs; [
@@ -86,14 +84,12 @@
                   cargoTarget = rustPlatform.cargoInstallHook.targetSubdirectory;
                 in
                 ''
-
                   install -D target/${cargoTarget}/release/examples/3d_shapes $out/bin/3d_shapes
                 '';
 
               postFixup =
                 with pkgs;
                 lib.optionalString stdenv.hostPlatform.isLinux ''
-
                   patchelf $out/bin/3d_shapes \
                     --add-rpath ${
                       lib.makeLibraryPath [
@@ -152,7 +148,6 @@
             programs = {
               nixfmt.enable = true;
               rustfmt.enable = true;
-              rustfmt.edition = "2024";
               taplo.enable = true;
             };
 
@@ -176,7 +171,7 @@
                   enable = true;
                   packageOverrides.cargo = toolchain;
                   packageOverrides.clippy = toolchain;
-                  settings.extraArgs = "--features=wayland";
+                  settings.extraArgs = "--all-features";
                 };
               };
             };
