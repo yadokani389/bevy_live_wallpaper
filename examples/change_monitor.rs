@@ -31,9 +31,7 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    let mut camera = commands.spawn(Camera2d);
-    #[cfg(any(feature = "wayland", feature = "x11"))]
-    camera.insert(LiveWallpaperCamera);
+    commands.spawn((Camera2d, LiveWallpaperCamera));
 
     commands.spawn((
         Sprite::from_color(Color::srgb(0.15, 0.4, 0.85), Vec2::splat(1600.0)),

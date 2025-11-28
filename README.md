@@ -51,14 +51,14 @@ platform-specific setup.
 - On **Wayland**/**X11**, you must disable the primary window and add the
   `LiveWallpaperCamera` component to the camera you want to render.
 - On **Windows**, the plugin will automatically find the primary window and
-  parent it to the desktop background. The `LiveWallpaperCamera` component is
-  not used.
+  parent it to the desktop background. `LiveWallpaperCamera` is not required,
+  but keeping it attached is harmless.
 
 Here is a complete, cross-platform example:
 
 ```rust
 use bevy::prelude::*;
-use bevy_live_wallpaper::LiveWallpaperPlugin;
+use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin};
 
 fn main() {
     let mut app = App::new();
@@ -92,13 +92,9 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    // Spawn a camera.
-    let mut camera = commands.spawn(Camera2d);
-
-    // On Wayland/X11, it needs the LiveWallpaperCamera component
-    // to be picked up by the plugin.
-    #[cfg(any(feature = "wayland", feature = "x11"))]
-    camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
+    // Spawn a camera. On Wayland/X11 this component is required; on Windows
+    // it is optional but harmless to keep for consistency.
+    commands.spawn((Camera2d, LiveWallpaperCamera));
 
     // ... spawn your scene entities here ...
     commands.spawn((

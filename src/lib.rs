@@ -11,10 +11,10 @@ pub mod plugin;
 pub mod target_monitor;
 
 #[cfg(feature = "wayland")]
-pub(crate) mod wayland;
+mod wayland;
 
 #[cfg(feature = "x11")]
-pub(crate) mod x11;
+mod x11;
 
 #[cfg(target_os = "windows")]
 mod windows_backend;

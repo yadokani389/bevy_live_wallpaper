@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_live_wallpaper::LiveWallpaperPlugin;
+use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin};
 
 fn main() {
     let mut app = App::new();
@@ -33,13 +33,9 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    // Spawn a camera.
-    let mut camera = commands.spawn(Camera2d);
-
-    // On Wayland/X11, it needs the LiveWallpaperCamera component
-    // to be picked up by the plugin.
-    #[cfg(any(feature = "wayland", feature = "x11"))]
-    camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
+    // Spawn a camera. On Wayland/X11 this component is required; on Windows
+    // it is optional but harmless to keep for consistency.
+    commands.spawn((Camera2d, LiveWallpaperCamera));
 
     // ... spawn your scene entities here ...
     commands.spawn((

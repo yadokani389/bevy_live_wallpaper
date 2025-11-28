@@ -8,7 +8,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use bevy_live_wallpaper::{LiveWallpaperPlugin, WallpaperTargetMonitor};
+use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperTargetMonitor};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -163,12 +163,11 @@ fn setup(
         MeshMaterial3d(materials.add(Color::from(SILVER))),
     ));
 
-    let mut camera = commands.spawn((
+    commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 7., 14.0).looking_at(Vec3::new(0., 1., 0.), Vec3::Y),
+        LiveWallpaperCamera,
     ));
-    #[cfg(any(feature = "wayland", feature = "x11"))]
-    camera.insert(bevy_live_wallpaper::LiveWallpaperCamera);
 }
 
 fn rotate(mut query: Query<&mut Transform, With<Shape>>, time: Res<Time>) {
