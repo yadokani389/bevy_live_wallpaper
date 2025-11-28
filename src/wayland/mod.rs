@@ -9,12 +9,20 @@ use wayland_client::Proxy;
 use wayland_client::protocol::wl_display;
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
-    protocol::{wl_callback, wl_compositor, wl_output, wl_registry, wl_surface},
+    protocol::{
+        wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_surface,
+    },
 };
 use wayland_protocols::xdg::xdg_output::zv1::client::{zxdg_output_manager_v1, zxdg_output_v1};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use self::surface::WaylandSurfaceHandles;
+
+#[derive(Clone, Debug)]
+pub(crate) struct PointerFocus {
+    output: u32,
+    position: Vec2,
+}
 
 #[derive(Resource)]
 pub(crate) struct WaylandAppState {
@@ -22,14 +30,19 @@ pub(crate) struct WaylandAppState {
     pub pending_surface_config: Vec<WaylandSurfaceConfig>,
     /// Outputs whose geometry/scale changed since last frame.
     pub dirty_outputs: HashSet<u32>,
+    pub pending_pointer_events: Vec<PendingPointerEvent>,
+    pub pointer_focus: Option<PointerFocus>,
     // Wayland objects
     pub display: wl_display::WlDisplay,
     pub compositor: Option<(wl_compositor::WlCompositor, u32)>,
     pub layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
+    pub seats: HashMap<u32, wl_seat::WlSeat>,
+    pub pointers: HashMap<u32, wl_pointer::WlPointer>,
     pub outputs: HashMap<u32, wl_output::WlOutput>,
     pub output_info: HashMap<u32, OutputInfo>,
     pub output_order: Vec<u32>,
     pub surfaces: HashMap<u32, OutputSurface>,
+    pub surface_to_output: HashMap<u32, u32>,
     pub xdg_output_manager: Option<zxdg_output_manager_v1::ZxdgOutputManagerV1>,
     pub xdg_outputs: HashMap<u32, zxdg_output_v1::ZxdgOutputV1>,
 }
@@ -37,6 +50,33 @@ pub(crate) struct WaylandAppState {
 pub(crate) struct OutputSurface {
     pub surface: wl_surface::WlSurface,
     pub layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingPointerEvent {
+    output: u32,
+    position: Vec2,
+    offset: Vec2,
+    kind: PendingPointerEventKind,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PendingPointerEventKind {
+    Motion,
+    Button {
+        button: Option<MouseButton>,
+        pressed: bool,
+    },
+}
+
+impl PendingPointerEventKind {
+    /// Returns button state transition if this event represents a button action.
+    fn button_change(&self) -> Option<(Option<MouseButton>, bool)> {
+        match self {
+            PendingPointerEventKind::Motion => None,
+            PendingPointerEventKind::Button { button, pressed } => Some((*button, *pressed)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -54,13 +94,18 @@ impl WaylandAppState {
             closed: false,
             pending_surface_config: Vec::new(),
             dirty_outputs: HashSet::new(),
+            pending_pointer_events: Vec::new(),
+            pointer_focus: None,
             display,
             compositor: None,
             layer_shell: None,
+            seats: HashMap::new(),
+            pointers: HashMap::new(),
             outputs: HashMap::new(),
             output_info: HashMap::new(),
             output_order: Vec::new(),
             surfaces: HashMap::new(),
+            surface_to_output: HashMap::new(),
             xdg_output_manager: None,
             xdg_outputs: HashMap::new(),
         }
@@ -111,6 +156,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandAppState {
                         info!("Compositor found: {} (version {})", name, version);
                         state.compositor = Some((registry.bind(name, version, qh, ()), name));
                     }
+                    "wl_seat" => {
+                        info!("Seat found: {} (version {})", name, version);
+                        let seat = registry.bind::<wl_seat::WlSeat, _, _>(name, version, qh, ());
+                        state.seats.insert(name, seat);
+                    }
                     "wl_output" => {
                         info!("Output found: {} (version {})", name, version);
                         let output =
@@ -140,10 +190,27 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandAppState {
                 if state.outputs.remove(&name).is_some() {
                     warn!("Output {} removed", name);
                     state.surfaces.remove(&name);
+                    state.surface_to_output.retain(|_, output| *output != name);
                     state.output_order.retain(|n| *n != name);
+                    if state
+                        .pointer_focus
+                        .as_ref()
+                        .map(|focus| focus.output == name)
+                        .unwrap_or(false)
+                    {
+                        state.pointer_focus = None;
+                    }
                     if let Some(xdg) = state.xdg_outputs.remove(&name) {
                         xdg.destroy();
                     }
+                }
+                if let Some(seat) = state.seats.remove(&name) {
+                    warn!("Seat {} removed", name);
+                    let seat_id = seat.id().protocol_id();
+                    if let Some(pointer) = state.pointers.remove(&seat_id) {
+                        pointer.release();
+                    }
+                    seat.release();
                 }
                 if let Some((_, layer_shell_name)) = &state.layer_shell
                     && *layer_shell_name == name
@@ -167,6 +234,137 @@ impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for WaylandAppState {
         _qh: &QueueHandle<Self>,
     ) {
         // Do nothing: LayerShell never dispatches events.
+    }
+}
+
+impl Dispatch<wl_seat::WlSeat, ()> for WaylandAppState {
+    fn event(
+        state: &mut Self,
+        seat: &wl_seat::WlSeat,
+        event: wl_seat::Event,
+        _data: &(),
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_seat::Event::Capabilities { capabilities } => {
+                let has_pointer = matches!(
+                    capabilities,
+                    wayland_client::WEnum::Value(cap)
+                        if cap.contains(wl_seat::Capability::Pointer)
+                );
+                let seat_id = seat.id().protocol_id();
+
+                if has_pointer {
+                    state
+                        .pointers
+                        .entry(seat_id)
+                        .or_insert_with(|| seat.get_pointer(qh, seat_id));
+                } else if let Some(pointer) = state.pointers.remove(&seat_id) {
+                    pointer.release();
+                }
+            }
+            wl_seat::Event::Name { .. } => {}
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, u32> for WaylandAppState {
+    fn event(
+        state: &mut Self,
+        _pointer: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _seat_id: &u32,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter {
+                surface,
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                let output = state
+                    .surface_to_output
+                    .get(&surface.id().protocol_id())
+                    .copied()
+                    .unwrap_or(u32::MAX);
+                let offset = state
+                    .output_info
+                    .get(&output)
+                    .map(|info| Vec2::new(info.x as f32, info.y as f32))
+                    .unwrap_or(Vec2::ZERO);
+                let position = Vec2::new(surface_x as f32, surface_y as f32);
+                state.pointer_focus = Some(PointerFocus { output, position });
+                state.pending_pointer_events.push(PendingPointerEvent {
+                    output,
+                    position,
+                    offset,
+                    kind: PendingPointerEventKind::Motion,
+                });
+            }
+            wl_pointer::Event::Leave { .. } => {
+                state.pointer_focus = None;
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                if let Some(focus) = state.pointer_focus.as_mut() {
+                    let offset = state
+                        .output_info
+                        .get(&focus.output)
+                        .map(|info| Vec2::new(info.x as f32, info.y as f32))
+                        .unwrap_or(Vec2::ZERO);
+                    focus.position = Vec2::new(surface_x as f32, surface_y as f32);
+                    state.pending_pointer_events.push(PendingPointerEvent {
+                        output: focus.output,
+                        position: focus.position,
+                        offset,
+                        kind: PendingPointerEventKind::Motion,
+                    });
+                }
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: btn_state,
+                ..
+            } => {
+                if let Some(focus) = state.pointer_focus.as_ref() {
+                    let offset = state
+                        .output_info
+                        .get(&focus.output)
+                        .map(|info| Vec2::new(info.x as f32, info.y as f32))
+                        .unwrap_or(Vec2::ZERO);
+
+                    let map_pointer_button = |code: u32| -> Option<MouseButton> {
+                        match code {
+                            272 => Some(MouseButton::Left),
+                            273 => Some(MouseButton::Right),
+                            274 => Some(MouseButton::Middle),
+                            other => u16::try_from(other).ok().map(MouseButton::Other),
+                        }
+                    };
+
+                    state.pending_pointer_events.push(PendingPointerEvent {
+                        output: focus.output,
+                        position: focus.position,
+                        offset,
+                        kind: PendingPointerEventKind::Button {
+                            button: map_pointer_button(button),
+                            pressed: matches!(
+                                btn_state,
+                                wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)
+                            ),
+                        },
+                    });
+                }
+            }
+            _ => {}
+        }
     }
 }
 
