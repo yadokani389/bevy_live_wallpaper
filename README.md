@@ -14,7 +14,7 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 ## Requirements
 
 - **Wayland**: A compositor that advertises `zwlr_layer_shell_v1` (e.g. Sway,
-  Hyprland, River).
+  Hyprland, River, Niri).
 - **X11**: An X server with the RandR extension enabled (standard on modern
   desktops).
 - **Windows**: The standard desktop environment.
@@ -135,6 +135,10 @@ cargo run --example=3d_shapes -- --target=0
 - On Windows, with Intel integrated graphics, the Vulkan backend may not work
   for setting the desktop background. In such cases, it is necessary to use the
   DX12 backend.
+- On Wayland, cursor position is only reported while the pointer is directly
+  over the layer surface; If another window is on top (or the pointer isn't
+  reaching the background), the position won't update. This is a Wayland
+  protocol limitation.
 
 ## Credits & References
 

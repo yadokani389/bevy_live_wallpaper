@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::WallpaperTargetMonitor;
+use crate::{WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor};
 
 /// Main plugin to run the live wallpaper.
 ///
@@ -13,7 +13,9 @@ pub struct LiveWallpaperPlugin {
 
 impl Plugin for LiveWallpaperPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.target_monitor);
+        app.insert_resource(self.target_monitor)
+            .init_resource::<WallpaperPointerState>()
+            .init_resource::<WallpaperSurfaceInfo>();
 
         #[cfg(feature = "wayland")]
         app.add_plugins(crate::wayland::backend::WaylandBackendPlugin);

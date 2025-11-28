@@ -6,22 +6,24 @@ use bevy::{
         render_resource::Extent3d,
     },
 };
-use std::collections::HashSet;
 
-use wayland_client::{Connection, EventQueue, QueueHandle};
+use wayland_client::{Connection, EventQueue, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-use crate::{LiveWallpaperCamera, WallpaperTargetMonitor};
+use crate::{
+    LiveWallpaperCamera, PointerButton, PointerSample, WallpaperPointerState, WallpaperSurfaceInfo,
+    WallpaperTargetMonitor,
+};
+use std::collections::HashSet;
 
 use super::{
-    WaylandAppState,
+    PendingPointerEvent, WaylandAppState,
     render::{
         WaylandGpuSurfaceState, WaylandRenderTarget, WaylandSurfaceDescriptor,
         create_wayland_image, prepare_wayland_surface, present_wayland_surface,
     },
 };
 
-#[derive(Default)]
 pub(crate) struct WaylandBackendPlugin;
 
 impl Plugin for WaylandBackendPlugin {
@@ -95,6 +97,8 @@ fn wayland_event_system(
     mut app_state: NonSendMut<WaylandAppState>,
     mut surface_descriptor: ResMut<WaylandSurfaceDescriptor>,
     target_monitor: Res<WallpaperTargetMonitor>,
+    mut pointer_state: ResMut<WallpaperPointerState>,
+    mut surface_info: ResMut<WallpaperSurfaceInfo>,
 ) {
     if app_state.is_running() {
         if let Err(err) = event_queue.blocking_dispatch(&mut app_state) {
@@ -133,6 +137,88 @@ fn wayland_event_system(
         if touched {
             surface_descriptor.bump_generation();
         }
+
+        apply_pointer_events(
+            &mut pointer_state,
+            app_state.pending_pointer_events.drain(..),
+        );
+
+        if let Some((min_x, min_y, w, h)) =
+            ready_bounds(&surface_descriptor, &app_state, &target_monitor)
+        {
+            surface_info.set(min_x, min_y, w, h);
+        }
+    }
+}
+
+fn ready_bounds(
+    descriptor: &WaylandSurfaceDescriptor,
+    app_state: &WaylandAppState,
+    target: &WallpaperTargetMonitor,
+) -> Option<(i32, i32, u32, u32)> {
+    let selected = selected_outputs(app_state, target)?;
+
+    let have_all_selected = selected.iter().all(|output| {
+        descriptor
+            .surfaces
+            .iter()
+            .find(|s| s.output == *output)
+            .map(|entry| entry.handles.is_some() && entry.width > 0 && entry.height > 0)
+            .unwrap_or(false)
+    });
+    if !have_all_selected {
+        return None;
+    }
+
+    let missing_output_for_all = matches!(target, WallpaperTargetMonitor::All)
+        && descriptor
+            .surfaces
+            .iter()
+            .filter(|s| s.handles.is_some())
+            .count()
+            < app_state.outputs.len();
+    if missing_output_for_all {
+        return None;
+    }
+
+    descriptor.overall_bounds()
+}
+
+fn apply_pointer_events(
+    state: &mut WallpaperPointerState,
+    pending: impl IntoIterator<Item = PendingPointerEvent>,
+) {
+    for evt in pending {
+        let prev_position = state
+            .last
+            .as_ref()
+            .map(|s| s.position)
+            .unwrap_or(evt.position + evt.offset);
+        let new_position = evt.position + evt.offset;
+
+        let mut sample = PointerSample {
+            output: Some(evt.output),
+            position: new_position,
+            delta: new_position - prev_position,
+            ..state.last.clone().unwrap_or_default()
+        };
+
+        sample.last_button = evt
+            .kind
+            .button_change()
+            .map(|(button, pressed)| PointerButton { button, pressed });
+
+        if let Some(btn) = sample.last_button
+            && let Some(button) = btn.button
+        {
+            if btn.pressed {
+                sample.pressed.insert(button);
+            } else {
+                sample.pressed.remove(&button);
+            }
+        }
+
+        state.last = Some(sample);
     }
 }
 
@@ -148,6 +234,14 @@ fn apply_output_info_updates(
 
     let mut changed_any = false;
 
+    #[inline]
+    fn update_if<T: PartialEq + Copy>(dst: &mut T, src: T, changed: &mut bool) {
+        if *dst != src {
+            *dst = src;
+            *changed = true;
+        }
+    }
+
     for surface in &mut descriptor.surfaces {
         if !app_state.dirty_outputs.contains(&surface.output) {
             continue;
@@ -156,27 +250,14 @@ fn apply_output_info_updates(
         if let Some(info) = app_state.output_info.get(&surface.output) {
             let mut changed = false;
 
-            if info.x != surface.offset_x {
-                surface.offset_x = info.x;
-                changed = true;
-            }
-            if info.y != surface.offset_y {
-                surface.offset_y = info.y;
-                changed = true;
-            }
+            update_if(&mut surface.offset_x, info.x, &mut changed);
+            update_if(&mut surface.offset_y, info.y, &mut changed);
+
             if info.width > 0 {
-                let w = info.width as u32;
-                if surface.width != w {
-                    surface.width = w;
-                    changed = true;
-                }
+                update_if(&mut surface.width, info.width as u32, &mut changed);
             }
             if info.height > 0 {
-                let h = info.height as u32;
-                if surface.height != h {
-                    surface.height = h;
-                    changed = true;
-                }
+                update_if(&mut surface.height, info.height as u32, &mut changed);
             }
 
             changed_any |= changed;
@@ -257,6 +338,7 @@ fn ensure_surfaces_for_outputs(
             continue;
         }
         let surface = compositor.0.create_surface(qh, ());
+        let surface_id = surface.id().protocol_id();
         let layer_surface = layer_shell.0.get_layer_surface(
             &surface,
             Some(output),
@@ -277,10 +359,11 @@ fn ensure_surfaces_for_outputs(
         app_state.surfaces.insert(
             *output_name,
             super::OutputSurface {
-                surface,
+                surface: surface.clone(),
                 layer_surface,
             },
         );
+        app_state.surface_to_output.insert(surface_id, *output_name);
         touched = true;
     }
 
@@ -297,6 +380,9 @@ fn ensure_surfaces_for_outputs(
             // Explicitly destroy to stop showing on that output.
             surface.layer_surface.destroy();
             surface.surface.destroy();
+            app_state
+                .surface_to_output
+                .remove(&surface.surface.id().protocol_id());
         }
         touched = true;
         removed.push(key);
