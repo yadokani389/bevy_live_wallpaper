@@ -7,7 +7,9 @@ use bevy::{
     },
 };
 
-use crate::{LiveWallpaperCamera, WallpaperTargetMonitor};
+use crate::{
+    LiveWallpaperCamera, WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
+};
 
 use super::{
     X11AppState,
@@ -75,6 +77,8 @@ fn x11_event_system(
     mut app_state: NonSendMut<X11AppState>,
     mut surface_descriptor: ResMut<X11SurfaceDescriptor>,
     target_monitor: Res<WallpaperTargetMonitor>,
+    mut pointer_state: ResMut<WallpaperPointerState>,
+    mut surface_info: ResMut<WallpaperSurfaceInfo>,
 ) {
     if !app_state.is_running() {
         return;
@@ -86,6 +90,14 @@ fn x11_event_system(
         && let Err(err) = app_state.apply_target(*target_monitor)
     {
         warn!("Failed to apply target monitor change: {err}");
+    }
+
+    if let Some((x, y, w, h)) = app_state.current_bounds() {
+        surface_info.set(x, y, w, h);
+    }
+
+    if let Some(sample) = app_state.poll_pointer(pointer_state.last.as_ref()) {
+        pointer_state.last = Some(sample);
     }
 
     if let Some(surface_config) = app_state.take_surface_config() {
