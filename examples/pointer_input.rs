@@ -1,27 +1,38 @@
-//! Pointer input demo for `bevy_live_wallpaper`.
-
 use bevy::prelude::*;
 use bevy_live_wallpaper::{
     LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperPointerState, WallpaperSurfaceInfo,
+    WallpaperTargetMonitor,
 };
 
 fn main() {
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: None,
-                    exit_condition: bevy::window::ExitCondition::DontExit,
-                    ..default()
-                })
-                .build(),
-        )
-        .add_plugins(LiveWallpaperPlugin {
-            target_monitor: bevy_live_wallpaper::WallpaperTargetMonitor::All,
-        })
-        .add_systems(Startup, spawn_camera)
-        .add_systems(Update, handle_pointer_state)
-        .run();
+    let mut app = App::new();
+
+    #[cfg(any(feature = "wayland", feature = "x11"))]
+    {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: None,
+            exit_condition: bevy::window::ExitCondition::DontExit,
+            ..default()
+        }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                decorations: false,
+                ..default()
+            }),
+            ..default()
+        }));
+    }
+
+    app.add_plugins(LiveWallpaperPlugin {
+        target_monitor: WallpaperTargetMonitor::All,
+    })
+    .add_systems(Startup, spawn_camera)
+    .add_systems(Update, handle_pointer_state)
+    .run();
 }
 
 fn spawn_camera(mut commands: Commands) {

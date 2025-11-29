@@ -44,7 +44,10 @@ x11rb = { version = "0.13.2", features = [
 ], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = [
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
 
 
 [dev-dependencies]
