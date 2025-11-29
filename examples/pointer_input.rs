@@ -1,4 +1,4 @@
-//! Wayland-only pointer input demo for `bevy_live_wallpaper`.
+//! Pointer input demo for `bevy_live_wallpaper`.
 
 use bevy::prelude::*;
 use bevy_live_wallpaper::{

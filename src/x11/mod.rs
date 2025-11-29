@@ -3,6 +3,7 @@ pub mod render;
 pub mod surface;
 
 use std::{
+    collections::HashSet,
     ffi::{c_int, c_void},
     ptr::NonNull,
 };
@@ -22,7 +23,7 @@ use x11rb::{
 
 use self::surface::X11SurfaceHandles;
 
-use crate::WallpaperTargetMonitor;
+use crate::{PointerButton, PointerSample, WallpaperTargetMonitor};
 
 pub(crate) struct X11AppState {
     connection: XCBConnection,
@@ -185,6 +186,48 @@ impl X11AppState {
         }
     }
 
+    /// Returns a snapshot of the current pointer (root) position and buttons.
+    pub(crate) fn poll_pointer(&self, prev: Option<&PointerSample>) -> Option<PointerSample> {
+        let reply = self
+            .connection
+            .query_pointer(self.root_window)
+            .ok()?
+            .reply()
+            .ok()?;
+
+        let position = Vec2::new(f32::from(reply.root_x), f32::from(reply.root_y));
+        let prev_position = prev.map(|p| p.position).unwrap_or(position);
+        let delta = position - prev_position;
+
+        let pressed = pressed_buttons(reply.mask.bits());
+        let last_button = detect_last_button(prev.map(|p| &p.pressed), &pressed);
+
+        let output = self.output_for_position(position);
+
+        Some(PointerSample {
+            output,
+            position,
+            delta,
+            pressed,
+            last_button,
+        })
+    }
+
+    fn output_for_position(&self, position: Vec2) -> Option<u32> {
+        self.monitors
+            .iter()
+            .enumerate()
+            .find(|(_, rect)| {
+                let px = position.x as i32;
+                let py = position.y as i32;
+                px >= rect.x as i32
+                    && px < rect.x as i32 + rect.width as i32
+                    && py >= rect.y as i32
+                    && py < rect.y as i32 + rect.height as i32
+            })
+            .map(|(idx, _)| idx as u32)
+    }
+
     pub(crate) fn apply_target(&mut self, target: WallpaperTargetMonitor) -> Result<(), String> {
         let Some(rect) = self.monitor_for(target) else {
             return Err("No monitors available for selected target".into());
@@ -242,6 +285,17 @@ impl X11AppState {
                 .copied(),
             WallpaperTargetMonitor::Index(n) => self.monitors.get(n).copied(),
         }
+    }
+
+    pub(crate) fn current_bounds(&self) -> Option<(i32, i32, u32, u32)> {
+        self.monitor_for(self.target).map(|rect| {
+            (
+                rect.x as i32,
+                rect.y as i32,
+                rect.width as u32,
+                rect.height as u32,
+            )
+        })
     }
 
     fn create_or_update_wallpaper_window(&mut self, visual: u32) -> Result<(), String> {
@@ -360,4 +414,63 @@ impl From<MonitorInfo> for MonitorRect {
             primary: m.primary,
         }
     }
+}
+
+fn pressed_buttons(mask: u16) -> HashSet<MouseButton> {
+    let mut set = HashSet::new();
+
+    let has = |button: u8| -> bool { mask & (1u16 << (button + 7)) != 0 };
+
+    if has(1) {
+        set.insert(MouseButton::Left);
+    }
+    if has(2) {
+        set.insert(MouseButton::Middle);
+    }
+    if has(3) {
+        set.insert(MouseButton::Right);
+    }
+
+    // Ignore BUTTON_4/BUTTON_5 (scroll) to avoid treating wheel motion as held buttons.
+
+    set
+}
+
+fn detect_last_button(
+    prev: Option<&HashSet<MouseButton>>,
+    current: &HashSet<MouseButton>,
+) -> Option<PointerButton> {
+    let empty = HashSet::new();
+    let prev = prev.unwrap_or(&empty);
+
+    let mut newly_pressed: Vec<MouseButton> = current.difference(prev).copied().collect();
+    if let Some(btn) = prioritize_button(&mut newly_pressed) {
+        return Some(PointerButton {
+            button: Some(btn),
+            pressed: true,
+        });
+    }
+
+    let mut released: Vec<MouseButton> = prev.difference(current).copied().collect();
+    if let Some(btn) = prioritize_button(&mut released) {
+        return Some(PointerButton {
+            button: Some(btn),
+            pressed: false,
+        });
+    }
+
+    None
+}
+
+fn prioritize_button(buttons: &mut Vec<MouseButton>) -> Option<MouseButton> {
+    // Deterministic priority similar to common UX expectations.
+    let priority = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
+
+    for p in priority {
+        if let Some(pos) = buttons.iter().position(|b| *b == p) {
+            return Some(buttons.swap_remove(pos));
+        }
+    }
+
+    buttons.pop()
 }
