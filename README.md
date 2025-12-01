@@ -8,7 +8,7 @@
 A [Bevy](https://bevyengine.org/) plugin that renders your scene into a Wayland
 layer-shell surface, an X11 root window, or a Windows desktop background.
 
-![demo](https://raw.githubusercontent.com/yadokani389/bevy_live_wallpaper/main/media/demo.mp4)
+![demo](https://raw.githubusercontent.com/yadokani389/bevy_live_wallpaper/main/media/demo.gif)
 
 ## Compatibility
 
