@@ -1,4 +1,9 @@
-// If no backend feature is chosen and we're not on Windows, require an explicit choice.
+//! Bevy Live Wallpaper
+//!
+//! A Bevy plugin that renders your scene as the desktop wallpaper on Wayland,
+//! X11, and Windows. Pick the matching backend feature (`wayland` or `x11`) on
+//! Linux/BSD; Windows works with defaults.
+
 #[cfg(all(
     not(feature = "wayland"),
     not(feature = "x11"),

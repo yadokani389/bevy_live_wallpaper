@@ -8,6 +8,7 @@ use crate::{WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor}
 /// Wayland, X11 (RandR), and Windows.
 #[derive(Default)]
 pub struct LiveWallpaperPlugin {
+    /// Selects which monitor(s) to render to (primary, index, or all).
     pub target_monitor: WallpaperTargetMonitor,
 }
 

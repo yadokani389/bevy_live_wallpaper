@@ -1,9 +1,14 @@
 # Bevy Live Wallpaper
 
 ![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)
+[![Crates.io](https://img.shields.io/crates/v/bevy_live_wallpaper.svg)](https://crates.io/crates/bevy_live_wallpaper)
+[![Docs](https://docs.rs/bevy_live_wallpaper/badge.svg)](https://docs.rs/bevy_live_wallpaper/latest/bevy_live_wallpaper/)
+![Platforms Windows | Linux](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-blue)
 
 A [Bevy](https://bevyengine.org/) plugin that renders your scene into a Wayland
 layer-shell surface, an X11 root window, or a Windows desktop background.
+
+![demo](https://raw.githubusercontent.com/yadokani389/bevy_live_wallpaper/main/media/demo.mp4)
 
 ## Compatibility
 

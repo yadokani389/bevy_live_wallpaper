@@ -15,7 +15,7 @@ pub struct PointerSample {
     pub output: Option<u32>,
     /// Global logical position (surface local + output offset).
     pub position: Vec2,
-    /// Delta from the previous sample (global logical coordinates).
+    /// Delta from the previous sample in global logical coordinates.
     pub delta: Vec2,
     pub last_button: Option<PointerButton>,
     /// Buttons currently held down.
