@@ -47,13 +47,19 @@
             cargo = toolchain;
             rustc = toolchain;
           };
+
+          cargoDeps = rustPlatform.importCargoLock {
+            lockFile = ./Cargo.lock;
+          };
+
           example =
             feature:
             rustPlatform.buildRustPackage {
               pname = "bevy_live_wallpaper-example";
               version = "0.1.0";
               src = ./.;
-              cargoLock.lockFile = ./Cargo.lock;
+
+              inherit cargoDeps;
 
               buildFeatures = [ feature ];
               checkFeatures = [ feature ];
@@ -163,6 +169,7 @@
           pre-commit = {
             check.enable = true;
             settings = {
+              settings.rust.check.cargoDeps = cargoDeps;
               hooks = {
                 ripsecrets.enable = true;
                 typos.enable = true;
@@ -172,6 +179,7 @@
                   packageOverrides.cargo = toolchain;
                   packageOverrides.clippy = toolchain;
                   settings.extraArgs = "--all-features";
+                  extraPackages = config.packages.default.nativeBuildInputs ++ config.packages.default.buildInputs;
                 };
               };
             };
