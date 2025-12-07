@@ -8,56 +8,64 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperTargetMonitor};
+use bevy_live_wallpaper::{
+    LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperDisplayMode, WallpaperTargetMonitor,
+};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// target monitor
+    /// Target monitor index (ignored if --all)
     #[arg(short, long, default_value_t = 0)]
     target: usize,
+    /// Use all monitors as one desktop span
     #[arg(short, long)]
     all: bool,
+    /// run in normal window instead of desktop wallpaper
+    #[arg(long)]
+    windowed: bool,
 }
 
 fn main() {
     let mut app = App::new();
     let args = Args::parse();
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
-    {
-        app.add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin::default_nearest())
-                .set(WindowPlugin {
-                    primary_window: None,
-                    exit_condition: bevy::window::ExitCondition::DontExit,
-                    ..default()
-                }),
-        );
+    let mut window_plugin = WindowPlugin::default();
+
+    if !args.windowed {
+        // Wallpaper mode adjustments differ per platform.
+        #[cfg(any(feature = "wayland", feature = "x11"))]
+        {
+            window_plugin.primary_window = None;
+            window_plugin.exit_condition = bevy::window::ExitCondition::DontExit;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            window_plugin.primary_window = Some(Window {
+                decorations: false,
+                ..default()
+            });
+        }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        app.add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin::default_nearest())
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        decorations: false,
-                        ..default()
-                    }),
-                    ..default()
-                }),
-        );
-    }
+    app.add_plugins(
+        DefaultPlugins
+            .set(ImagePlugin::default_nearest())
+            .set(window_plugin),
+    );
 
     app.add_plugins(LiveWallpaperPlugin {
         target_monitor: if args.all {
             WallpaperTargetMonitor::All
         } else {
             WallpaperTargetMonitor::Index(args.target)
+        },
+        display_mode: if args.windowed {
+            WallpaperDisplayMode::Windowed
+        } else {
+            WallpaperDisplayMode::Wallpaper
         },
     });
 

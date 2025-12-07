@@ -7,28 +7,27 @@ use bevy_live_wallpaper::{
 fn main() {
     let mut app = App::new();
 
+    let mut window_plugin = WindowPlugin::default();
+
     #[cfg(any(feature = "wayland", feature = "x11"))]
     {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: None,
-            exit_condition: bevy::window::ExitCondition::DontExit,
-            ..default()
-        }));
+        window_plugin.primary_window = None;
+        window_plugin.exit_condition = bevy::window::ExitCondition::DontExit;
     }
 
     #[cfg(target_os = "windows")]
     {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                decorations: false,
-                ..default()
-            }),
+        window_plugin.primary_window = Some(Window {
+            decorations: false,
             ..default()
-        }));
+        });
     }
+
+    app.add_plugins(DefaultPlugins.set(window_plugin));
 
     app.add_plugins(LiveWallpaperPlugin {
         target_monitor: WallpaperTargetMonitor::All,
+        display_mode: default(),
     })
     .add_systems(Startup, spawn_camera)
     .add_systems(Update, handle_pointer_state)
@@ -49,14 +48,13 @@ fn handle_pointer_state(
             "Output {:?}: position={:?}, delta={:?}, pressed={:?}, last_button={:?}",
             sample.output, sample.position, sample.delta, sample.pressed, sample.last_button
         );
+        // Convert to surface-local, center-origin coordinates (Y up) for visualization.
         let mut position = sample.position - surface.offset_position;
-        position.y *= -1.;
         position.x -= surface.size.x / 2.0;
-        position.y += surface.size.y / 2.0;
+        position.y = surface.size.y / 2.0 - position.y;
 
-        let mut prev = position;
-        prev.x -= sample.delta.x;
-        prev.y += sample.delta.y;
+        let delta_world = Vec2::new(sample.delta.x, -sample.delta.y);
+        let prev = position - delta_world;
         let color = sample
             .last_button
             .map(|btn| {

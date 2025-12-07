@@ -16,6 +16,7 @@ pub mod input;
 pub mod plugin;
 pub mod surface_info;
 pub mod target_monitor;
+mod windowed_backend;
 
 #[cfg(feature = "wayland")]
 mod wayland;
@@ -27,6 +28,7 @@ mod x11;
 mod windows_backend;
 
 pub use plugin::LiveWallpaperPlugin;
+pub use plugin::WallpaperDisplayMode;
 
 pub use camera::LiveWallpaperCamera;
 pub use input::{PointerButton, PointerSample, WallpaperPointerState};

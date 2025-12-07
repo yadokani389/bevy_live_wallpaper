@@ -4,28 +4,25 @@ use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin};
 fn main() {
     let mut app = App::new();
 
-    // Platform-specific plugin setup
+    // Platform-specific window adjustments for wallpaper mode.
+    // On Wayland/X11, the primary window must be disabled; on Windows, use a borderless window.
+    let mut window_plugin = WindowPlugin::default();
+
     #[cfg(any(feature = "wayland", feature = "x11"))]
     {
-        // On Wayland/X11, we can't have a primary window
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: None,
-            exit_condition: bevy::window::ExitCondition::DontExit,
-            ..default()
-        }));
+        window_plugin.primary_window = None;
+        window_plugin.exit_condition = bevy::window::ExitCondition::DontExit;
     }
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows we must start as BorderlessFullscreen so the WorkerW child covers the monitor.
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                decorations: false,
-                ..default()
-            }),
+        window_plugin.primary_window = Some(Window {
+            decorations: false,
             ..default()
-        }));
+        });
     }
+
+    app.add_plugins(DefaultPlugins.set(window_plugin));
 
     app.add_plugins(LiveWallpaperPlugin::default());
 

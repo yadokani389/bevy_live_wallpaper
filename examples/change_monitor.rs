@@ -7,21 +7,23 @@ use bevy_live_wallpaper::{LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperTar
 fn main() {
     let mut app = App::new();
 
+    let mut window_plugin = WindowPlugin::default();
+
     #[cfg(any(feature = "wayland", feature = "x11"))]
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: None,
-        exit_condition: bevy::window::ExitCondition::DontExit,
-        ..default()
-    }));
+    {
+        window_plugin.primary_window = None;
+        window_plugin.exit_condition = bevy::window::ExitCondition::DontExit;
+    }
 
     #[cfg(target_os = "windows")]
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
+    {
+        window_plugin.primary_window = Some(Window {
             decorations: false,
             ..default()
-        }),
-        ..default()
-    }));
+        });
+    }
+
+    app.add_plugins(DefaultPlugins.set(window_plugin));
 
     app.add_plugins(LiveWallpaperPlugin::default());
 
