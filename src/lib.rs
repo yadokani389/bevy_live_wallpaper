@@ -9,7 +9,9 @@
     not(feature = "x11"),
     not(target_os = "windows")
 ))]
-compile_error!("On non-Windows platforms, either the 'wayland' or 'x11' feature must be enabled.");
+compile_error!(
+    "On non-Windows platforms, at least one of the 'wayland' or 'x11' features must be enabled."
+);
 
 pub mod camera;
 pub mod input;
@@ -27,8 +29,7 @@ mod x11;
 #[cfg(target_os = "windows")]
 mod windows_backend;
 
-pub use plugin::LiveWallpaperPlugin;
-pub use plugin::WallpaperDisplayMode;
+pub use plugin::{LinuxBackend, LiveWallpaperPlugin, WallpaperDisplayMode};
 
 pub use camera::LiveWallpaperCamera;
 pub use input::{PointerButton, PointerSample, WallpaperPointerState};

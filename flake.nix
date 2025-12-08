@@ -52,68 +52,72 @@
             lockFile = ./Cargo.lock;
           };
 
-          example =
-            feature:
-            rustPlatform.buildRustPackage {
-              pname = "bevy_live_wallpaper-example";
-              version = "0.2.0";
-              src = ./.;
+          example = rustPlatform.buildRustPackage {
+            pname = "bevy_live_wallpaper-example";
+            version = "0.2.0";
+            src = ./.;
 
-              inherit cargoDeps;
+            inherit cargoDeps;
 
-              buildFeatures = [ feature ];
-              checkFeatures = [ feature ];
-              cargoBuildFlags = [
-                "--example=3d_shapes"
+            buildFeatures = [
+              "wayland"
+              "x11"
+            ];
+            checkFeatures = [
+              "wayland"
+              "x11"
+            ];
+            cargoBuildFlags = [
+              "--example=3d_shapes"
+            ];
+
+            nativeBuildInputs = with pkgs; [
+              makeWrapper
+              pkg-config
+            ];
+
+            buildInputs = with pkgs; [
+              zstd
+              libglvnd
+              alsa-lib
+              udev
+              vulkan-loader
+              wayland
+              xorg.libX11
+              xorg.libXcursor
+              xorg.libXi
+              xorg.libXrandr
+            ];
+
+            postInstall =
+              let
+                cargoTarget = rustPlatform.cargoInstallHook.targetSubdirectory;
+              in
+              ''
+                install -D target/${cargoTarget}/release/examples/3d_shapes $out/bin/3d_shapes
+              '';
+
+            postFixup =
+              with pkgs;
+              lib.optionalString stdenv.hostPlatform.isLinux ''
+                patchelf $out/bin/3d_shapes \
+                  --add-rpath ${
+                    lib.makeLibraryPath [
+                      libxkbcommon
+                      vulkan-loader
+                    ]
+                  }
+              '';
+
+            meta = {
+              homepage = "https://github.com/yadokani389/bevy_live_wallpaper";
+              license = with pkgs.lib.licenses; [
+                asl20
+                mit
               ];
-
-              nativeBuildInputs = with pkgs; [
-                makeWrapper
-                pkg-config
-              ];
-
-              buildInputs = with pkgs; [
-                zstd
-                libglvnd
-                alsa-lib
-                udev
-                vulkan-loader
-                wayland
-                xorg.libX11
-                xorg.libXcursor
-                xorg.libXi
-                xorg.libXrandr
-              ];
-
-              postInstall =
-                let
-                  cargoTarget = rustPlatform.cargoInstallHook.targetSubdirectory;
-                in
-                ''
-                  install -D target/${cargoTarget}/release/examples/3d_shapes $out/bin/3d_shapes
-                '';
-
-              postFixup =
-                with pkgs;
-                lib.optionalString stdenv.hostPlatform.isLinux ''
-                  patchelf $out/bin/3d_shapes \
-                    --add-rpath ${
-                      lib.makeLibraryPath [
-                        libxkbcommon
-                        vulkan-loader
-                      ]
-                    }
-                '';
-
-              meta = {
-                homepage = "https://github.com/yadokani389/bevy_live_wallpaper";
-                license = with pkgs.lib.licenses; [
-                  asl20
-                  mit
-                ];
-                mainProgram = "3d_shapes";
-              };
+              mainProgram = "3d_shapes";
             };
+          };
         in
         {
           _module.args.pkgs = import nixpkgs {
@@ -121,11 +125,7 @@
             overlays = [ inputs.rust-overlay.overlays.default ];
           };
 
-          packages = {
-            default = example "wayland";
-            wayland = example "wayland";
-            x11 = example "x11";
-          };
+          packages.default = example;
 
           devShells.default = pkgs.mkShell {
             inputsFrom = [
@@ -179,7 +179,7 @@
                   packageOverrides.cargo = toolchain;
                   packageOverrides.clippy = toolchain;
                   settings.extraArgs = "--all-features";
-                  extraPackages = config.packages.default.nativeBuildInputs ++ config.packages.default.buildInputs;
+                  extraPackages = example.nativeBuildInputs ++ example.buildInputs;
                 };
               };
             };

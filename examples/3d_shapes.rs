@@ -9,9 +9,18 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use bevy_live_wallpaper::{
-    LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperDisplayMode, WallpaperTargetMonitor,
+    LinuxBackend, LiveWallpaperCamera, LiveWallpaperPlugin, WallpaperDisplayMode,
+    WallpaperTargetMonitor,
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+enum Backend {
+    #[default]
+    Auto,
+    Wayland,
+    X11,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -25,6 +34,9 @@ struct Args {
     /// run in normal window instead of desktop wallpaper
     #[arg(long)]
     windowed: bool,
+    /// (Linux only) Select rendering backend.
+    #[arg(long, value_enum, default_value_t = Backend::Auto)]
+    backend: Backend,
 }
 
 fn main() {
@@ -56,6 +68,12 @@ fn main() {
             .set(window_plugin),
     );
 
+    let linux_backend = match args.backend {
+        Backend::Auto => LinuxBackend::Auto,
+        Backend::Wayland => LinuxBackend::Wayland,
+        Backend::X11 => LinuxBackend::X11,
+    };
+
     app.add_plugins(LiveWallpaperPlugin {
         target_monitor: if args.all {
             WallpaperTargetMonitor::All
@@ -67,6 +85,7 @@ fn main() {
         } else {
             WallpaperDisplayMode::Wallpaper
         },
+        linux_backend,
     });
 
     app.add_systems(Startup, setup)

@@ -27,7 +27,7 @@ fn main() {
 
     app.add_plugins(LiveWallpaperPlugin {
         target_monitor: WallpaperTargetMonitor::All,
-        display_mode: default(),
+        ..default()
     })
     .add_systems(Startup, spawn_camera)
     .add_systems(Update, handle_pointer_state)

@@ -28,8 +28,11 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 - On **Windows**, the appropriate backend is selected automatically. No features
   need to be enabled.
-- On **Linux/BSD**, enable the backend feature that matches your session
-  (`wayland` or `x11`). Only one backend should be enabled at a time.
+- On **Linux/BSD**, you can enable the `wayland` and/or `x11` features.
+  - If both are enabled, the backend is automatically selected at runtime based
+    on the user's session (Wayland is preferred). You can also request a
+    specific backend.
+  - If only one is enabled, it will be used.
 
 ```toml
 # In your Cargo.toml
@@ -38,13 +41,9 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 [dependencies]
 bevy_live_wallpaper = "0.2.0"
 
-# For Linux/BSD (Wayland):
+# For Linux/BSD:
 [dependencies]
-bevy_live_wallpaper = { version = "0.2.0", features = ["wayland"] }
-
-# For Linux/BSD (X11):
-[dependencies]
-bevy_live_wallpaper = { version = "0.2.0", features = ["x11"] }
+bevy_live_wallpaper = { version = "0.2.0", features = ["wayland", "x11"] }
 ```
 
 ## Usage
@@ -110,20 +109,12 @@ fn setup_scene(mut commands: Commands) {
 
 The included examples are cross-platform.
 
-- **Run on Wayland (Linux/BSD):**
+- **Run on Linux/BSD:**
 
 ```sh
-cargo run --features=wayland --example=3d_shapes -- --help
+cargo run --features=wayland,x11 --example=3d_shapes -- --help
 # or
 nix run github:yadokani389/bevy_live_wallpaper -- --help
-```
-
-- **Run on X11 (Linux/BSD):**
-
-```sh
-cargo run --features=x11 --example=3d_shapes -- --help
-# or
-nix run github:yadokani389/bevy_live_wallpaper#x11 -- --help
 ```
 
 - **Run on Windows:**
