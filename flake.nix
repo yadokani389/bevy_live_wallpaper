@@ -54,7 +54,7 @@
 
           example = rustPlatform.buildRustPackage {
             pname = "bevy_live_wallpaper-example";
-            version = "0.3.0";
+            version = "0.3.1";
             src = ./.;
 
             inherit cargoDeps;

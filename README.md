@@ -39,11 +39,11 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 # For Windows:
 [dependencies]
-bevy_live_wallpaper = "0.3.0"
+bevy_live_wallpaper = "0.3.1"
 
 # For Linux/BSD:
 [dependencies]
-bevy_live_wallpaper = { version = "0.3.0", features = ["wayland", "x11"] }
+bevy_live_wallpaper = { version = "0.3.1", features = ["wayland", "x11"] }
 ```
 
 ## Usage

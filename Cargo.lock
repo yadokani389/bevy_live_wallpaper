@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_live_wallpaper"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "as-raw-xcb-connection",
  "bevy",
