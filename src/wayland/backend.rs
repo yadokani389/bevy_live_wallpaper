@@ -138,10 +138,16 @@ fn wayland_event_system(
             surface_descriptor.bump_generation();
         }
 
+        let had_pointer_events = !app_state.pending_pointer_events.is_empty();
         apply_pointer_events(
             &mut pointer_state,
             app_state.pending_pointer_events.drain(..),
         );
+
+        if !had_pointer_events && let Some(sample) = pointer_state.last.as_mut() {
+            sample.delta = Vec2::ZERO;
+            sample.last_button = None;
+        }
 
         if let Some((min_x, min_y, w, h)) =
             ready_bounds(&surface_descriptor, &app_state, &target_monitor)

@@ -71,11 +71,15 @@ fn windowed_backend_system(
         latest_height.max(1.0) as u32,
     );
 
+    let mut saw_cursor_event = false;
+    let mut saw_button_event = false;
+
     // Track cursor movement in logical coordinates relative to desktop by adding offset.
     for evt in cursor_moved_events.read() {
         if evt.window != window_entity {
             continue;
         }
+        saw_cursor_event = true;
 
         let global_position = evt.position + state.logical_offset;
         let prev_position = pointer_state
@@ -104,6 +108,7 @@ fn windowed_backend_system(
         if evt.window != window_entity {
             continue;
         }
+        saw_button_event = true;
 
         let mut pressed = pointer_state
             .last
@@ -136,5 +141,13 @@ fn windowed_backend_system(
             }),
             pressed,
         });
+    }
+
+    if !saw_cursor_event
+        && !saw_button_event
+        && let Some(sample) = pointer_state.last.as_mut()
+    {
+        sample.delta = Vec2::ZERO;
+        sample.last_button = None;
     }
 }
