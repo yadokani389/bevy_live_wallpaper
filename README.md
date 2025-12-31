@@ -123,6 +123,10 @@ nix run github:yadokani389/bevy_live_wallpaper -- --help
 cargo run --example=3d_shapes -- --help
 ```
 
+https://github.com/yadokani389/flow-clock
+
+https://github.com/yadokani389/co-myaku-wallpaper
+
 ## Known Issues
 
 - On Windows, with Intel integrated graphics, the Vulkan backend may not work
