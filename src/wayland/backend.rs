@@ -306,10 +306,13 @@ fn sync_wayland_render_target_image(
 
 fn assign_wayland_camera_target(
     target: Res<WaylandRenderTarget>,
-    mut cameras: Query<&mut Camera, With<LiveWallpaperCamera>>,
+    mut commands: Commands,
+    cameras: Query<Entity, With<LiveWallpaperCamera>>,
 ) {
-    for mut camera in &mut cameras {
-        camera.target = RenderTarget::Image(target.image.clone().into());
+    for entity in &cameras {
+        commands
+            .entity(entity)
+            .insert(RenderTarget::Image(target.image.clone().into()));
     }
 }
 
