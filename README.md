@@ -14,6 +14,7 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 | Bevy Version | Crate Version |
 | ------------ | ------------- |
+| `0.18`       | `0.4`         |
 | `0.17`       | `0.1`-`0.3`   |
 
 ## Requirements
@@ -39,11 +40,11 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 # For Windows:
 [dependencies]
-bevy_live_wallpaper = "0.3.1"
+bevy_live_wallpaper = "0.4.0"
 
 # For Linux/BSD:
 [dependencies]
-bevy_live_wallpaper = { version = "0.3.1", features = ["wayland", "x11"] }
+bevy_live_wallpaper = { version = "0.4.0", features = ["wayland", "x11"] }
 ```
 
 ## Usage
