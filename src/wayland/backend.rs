@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::io::ErrorKind;
+
 use bevy::{
     camera::RenderTarget,
     prelude::*,
@@ -6,7 +9,6 @@ use bevy::{
         render_resource::Extent3d,
     },
 };
-
 use wayland_client::{Connection, EventQueue, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
@@ -14,7 +16,6 @@ use crate::{
     LiveWallpaperCamera, PointerButton, PointerSample, WallpaperPointerState, WallpaperSurfaceInfo,
     WallpaperTargetMonitor,
 };
-use std::collections::HashSet;
 
 use super::{
     PendingPointerEvent, WaylandAppState,
@@ -101,7 +102,7 @@ fn wayland_event_system(
     mut surface_info: ResMut<WallpaperSurfaceInfo>,
 ) {
     if app_state.is_running() {
-        if let Err(err) = event_queue.blocking_dispatch(&mut app_state) {
+        if let Err(err) = pump_wayland_events(&mut event_queue, &mut app_state) {
             warn!("Wayland event dispatch failed: {err:?}; closing background surface");
             app_state.closed = true;
             surface_descriptor.surfaces.clear();
@@ -155,6 +156,28 @@ fn wayland_event_system(
             surface_info.set(min_x, min_y, w, h);
         }
     }
+}
+
+fn pump_wayland_events(
+    event_queue: &mut WaylandEventQueue,
+    app_state: &mut WaylandAppState,
+) -> Result<(), wayland_client::DispatchError> {
+    while event_queue.dispatch_pending(app_state)? > 0 {}
+
+    event_queue.flush()?;
+
+    if let Some(read_guard) = event_queue.prepare_read() {
+        match read_guard.read() {
+            Ok(_) => while event_queue.dispatch_pending(app_state)? > 0 {},
+            Err(wayland_client::backend::WaylandError::Io(err))
+                if err.kind() == ErrorKind::WouldBlock => {}
+            Err(err) => return Err(err.into()),
+        }
+    } else {
+        while event_queue.dispatch_pending(app_state)? > 0 {}
+    }
+
+    Ok(())
 }
 
 fn ready_bounds(

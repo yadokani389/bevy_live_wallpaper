@@ -209,8 +209,9 @@ pub(crate) fn prepare_wayland_surface(
                 .present_modes
                 .iter()
                 .copied()
-                .find(|mode| matches!(mode, PresentMode::Mailbox | PresentMode::Immediate))
-                .unwrap_or(PresentMode::Fifo);
+                .find(|mode| matches!(mode, PresentMode::Fifo))
+                .or_else(|| capabilities.present_modes.first().copied())
+                .expect("Wayland surface has no supported present mode");
 
             let alpha_mode = capabilities
                 .alpha_modes
@@ -286,9 +287,18 @@ pub(crate) fn present_wayland_surface(
 
         let surface_texture = match surface.get_current_texture() {
             Ok(texture) => texture,
-            Err(SurfaceError::Outdated | SurfaceError::Lost) => {
+            Err(SurfaceError::Outdated) => {
+                debug!(
+                    "Wayland surface for output {} outdated; scheduling reconfigure",
+                    output
+                );
+                entry.config = None;
+                entry.last_applied_generation = 0;
+                continue;
+            }
+            Err(SurfaceError::Lost) => {
                 warn!(
-                    "Wayland surface for output {} outdated/lost; scheduling recreate",
+                    "Wayland surface for output {} lost; scheduling recreate",
                     output
                 );
                 entry.surface = None;
