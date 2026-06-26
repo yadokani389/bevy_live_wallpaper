@@ -14,6 +14,7 @@ layer-shell surface, an X11 root window, or a Windows desktop background.
 
 | Bevy Version | Crate Version |
 | ------------ | ------------- |
+| `0.19`       | `0.5`         |
 | `0.18`       | `0.4`         |
 | `0.17`       | `0.1`-`0.3`   |
 
