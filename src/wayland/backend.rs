@@ -85,8 +85,8 @@ impl Plugin for WaylandBackendPlugin {
                     assign_wayland_camera_target.after(sync_wayland_render_target_image),
                 ),
             )
-            .insert_non_send_resource(WaylandEventQueue(event_queue))
-            .insert_non_send_resource(app_state);
+            .insert_non_send(WaylandEventQueue(event_queue))
+            .insert_non_send(app_state);
     }
 }
 
@@ -310,7 +310,7 @@ fn sync_wayland_render_target_image(
         return;
     }
 
-    if let Some(image) = images.get_mut(&target.image) {
+    if let Some(mut image) = images.get_mut(&target.image) {
         let size = Extent3d {
             width,
             height,

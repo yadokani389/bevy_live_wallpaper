@@ -11,8 +11,8 @@ use bevy::{
     },
 };
 use wgpu::{
-    CommandEncoderDescriptor, CompositeAlphaMode, Origin3d, PresentMode, SurfaceConfiguration,
-    SurfaceError, SurfaceTargetUnsafe, TextureAspect,
+    CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Origin3d, PresentMode,
+    SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
 use crate::x11::surface::X11SurfaceHandles;
@@ -120,7 +120,7 @@ pub(crate) fn prepare_x11_surface(
         let surface = unsafe {
             instance
                 .create_surface_unsafe(SurfaceTargetUnsafe::RawHandle {
-                    raw_display_handle,
+                    raw_display_handle: Some(raw_display_handle),
                     raw_window_handle,
                 })
                 .expect("failed to create X11 wgpu surface")
@@ -219,29 +219,26 @@ pub(crate) fn present_x11_surface(
     };
 
     let extent = Extent3d {
-        width: config.width.min(gpu_image.size.width),
-        height: config.height.min(gpu_image.size.height),
+        width: config.width.min(gpu_image.texture_descriptor.size.width),
+        height: config.height.min(gpu_image.texture_descriptor.size.height),
         depth_or_array_layers: 1,
     };
 
     let surface_texture = match surface.get_current_texture() {
-        Ok(texture) => texture,
-        Err(SurfaceError::Outdated | SurfaceError::Lost) => {
+        CurrentSurfaceTexture::Success(texture) | CurrentSurfaceTexture::Suboptimal(texture) => {
+            texture
+        }
+        CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
             warn!("X11 surface outdated/lost; scheduling recreate");
             state.mark_stale();
             return;
         }
-        Err(SurfaceError::Timeout) => {
+        CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => {
             debug!("X11 surface acquire timeout");
             return;
         }
-        Err(SurfaceError::OutOfMemory) => {
-            error!("X11 surface out of memory; disabling");
-            state.mark_stale();
-            return;
-        }
-        Err(other) => {
-            warn!("Unexpected X11 surface error: {other:?}");
+        CurrentSurfaceTexture::Validation => {
+            error!("X11 surface validation failed");
             return;
         }
     };

@@ -69,7 +69,7 @@ impl Plugin for X11BackendPlugin {
                     assign_x11_camera_target.after(sync_x11_render_target_image),
                 ),
             )
-            .insert_non_send_resource(app_state);
+            .insert_non_send(app_state);
     }
 }
 
@@ -125,7 +125,7 @@ fn sync_x11_render_target_image(
         return;
     }
 
-    if let Some(image) = images.get_mut(&target.image) {
+    if let Some(mut image) = images.get_mut(&target.image) {
         let size = Extent3d {
             width: descriptor.width,
             height: descriptor.height,

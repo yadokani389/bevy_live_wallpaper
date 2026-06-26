@@ -1,4 +1,5 @@
 use bevy::{
+    ecs::system::SystemParam,
     input::{ButtonState, mouse::MouseButtonInput},
     prelude::*,
     window::{CursorMoved, PrimaryWindow, WindowMoved, WindowResized},
@@ -18,32 +19,33 @@ impl Plugin for WindowedBackendPlugin {
 
 #[derive(Default, Resource)]
 struct WindowedBackendState {
-    /// Cached primary window entity.
-    window_entity: Option<Entity>,
     /// Last known logical offset of the window within the virtual desktop.
     logical_offset: Vec2,
+}
+
+#[derive(SystemParam)]
+struct WindowedBackendParams<'w, 's> {
+    windows: Query<'w, 's, (Entity, &'static Window), With<PrimaryWindow>>,
+    cursor_moved_events: MessageReader<'w, 's, CursorMoved>,
+    mouse_button_events: MessageReader<'w, 's, MouseButtonInput>,
+    window_resized_events: MessageReader<'w, 's, WindowResized>,
+    window_moved_events: MessageReader<'w, 's, WindowMoved>,
 }
 
 fn windowed_backend_system(
     mut state: ResMut<WindowedBackendState>,
     mut pointer_state: ResMut<WallpaperPointerState>,
     mut surface_info: ResMut<WallpaperSurfaceInfo>,
-    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
-    mut cursor_moved_events: MessageReader<CursorMoved>,
-    mut mouse_button_events: MessageReader<MouseButtonInput>,
-    mut window_resized_events: MessageReader<WindowResized>,
-    mut window_moved_events: MessageReader<WindowMoved>,
+    mut params: WindowedBackendParams,
 ) {
-    let Some((window_entity, window)) = windows.iter().next() else {
+    let Some((window_entity, window)) = params.windows.iter().next() else {
         warn!("Windowed mode requires a primary window but none was found.");
         return;
     };
 
-    state.window_entity = Some(window_entity);
-
     // Update cached logical offset from WindowMoved events.
     let scale_factor = window.scale_factor();
-    for evt in window_moved_events.read() {
+    for evt in params.window_moved_events.read() {
         if evt.window != window_entity {
             continue;
         }
@@ -56,7 +58,7 @@ fn windowed_backend_system(
     // Apply size/offset to surface info; prefer event size when present, fallback to current window size.
     let mut latest_width = window.width();
     let mut latest_height = window.height();
-    for evt in window_resized_events.read() {
+    for evt in params.window_resized_events.read() {
         if evt.window != window_entity {
             continue;
         }
@@ -75,7 +77,7 @@ fn windowed_backend_system(
     let mut saw_button_event = false;
 
     // Track cursor movement in logical coordinates relative to desktop by adding offset.
-    for evt in cursor_moved_events.read() {
+    for evt in params.cursor_moved_events.read() {
         if evt.window != window_entity {
             continue;
         }
@@ -104,7 +106,7 @@ fn windowed_backend_system(
     }
 
     // Mouse buttons are handled separately so clicks without movement still update state.
-    for evt in mouse_button_events.read() {
+    for evt in params.mouse_button_events.read() {
         if evt.window != window_entity {
             continue;
         }
