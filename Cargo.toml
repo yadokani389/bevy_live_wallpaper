@@ -16,7 +16,7 @@ metadata.docs.rs.all-features = true
 name = "bevy_live_wallpaper"
 readme = "README.md"
 repository = "https://github.com/yadokani389/bevy_live_wallpaper"
-rust-version = "1.89.0"
+rust-version = "1.95.0"
 version = "0.4.0"
 
 [features]
@@ -30,14 +30,14 @@ wayland = [
 x11 = ["dep:as-raw-xcb-connection", "dep:x11rb", "dep:wgpu"]
 
 [dependencies]
-bevy = { version = "0.18", default-features = false, features = [
+bevy = { version = "0.19", default-features = false, features = [
   "bevy_render",
   "bevy_camera",
   "bevy_window",
   "trace",
 ] }
 raw-window-handle = "0.6.2"
-wgpu = { version = "27.0.1", optional = true }
+wgpu = { version = "29.0.3", optional = true }
 
 # wayland
 wayland-backend = { version = "0.3.11", features = [
@@ -67,5 +67,5 @@ windows = { version = "0.62.2", features = [
 
 
 [dev-dependencies]
-bevy = "0.18"
+bevy = "0.19"
 clap = { version = "4.5", features = ["derive"] }

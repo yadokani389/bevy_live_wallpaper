@@ -13,8 +13,8 @@ use bevy::{
     },
 };
 use wgpu::{
-    CommandEncoderDescriptor, CompositeAlphaMode, Origin3d, PresentMode, SurfaceConfiguration,
-    SurfaceError, SurfaceTargetUnsafe, TextureAspect,
+    CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Origin3d, PresentMode,
+    SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
 use crate::wayland::surface::WaylandSurfaceHandles;
@@ -166,7 +166,7 @@ pub(crate) fn prepare_wayland_surface(
             let surface = unsafe {
                 instance
                     .create_surface_unsafe(SurfaceTargetUnsafe::RawHandle {
-                        raw_display_handle,
+                        raw_display_handle: Some(raw_display_handle),
                         raw_window_handle,
                     })
                     .expect("failed to create Wayland wgpu surface")
@@ -280,14 +280,15 @@ pub(crate) fn present_wayland_surface(
         };
 
         let extent = Extent3d {
-            width: config.width.min(gpu_image.size.width),
-            height: config.height.min(gpu_image.size.height),
+            width: config.width.min(gpu_image.texture_descriptor.size.width),
+            height: config.height.min(gpu_image.texture_descriptor.size.height),
             depth_or_array_layers: 1,
         };
 
         let surface_texture = match surface.get_current_texture() {
-            Ok(texture) => texture,
-            Err(SurfaceError::Outdated) => {
+            CurrentSurfaceTexture::Success(texture)
+            | CurrentSurfaceTexture::Suboptimal(texture) => texture,
+            CurrentSurfaceTexture::Outdated => {
                 debug!(
                     "Wayland surface for output {} outdated; scheduling reconfigure",
                     output
@@ -296,7 +297,7 @@ pub(crate) fn present_wayland_surface(
                 entry.last_applied_generation = 0;
                 continue;
             }
-            Err(SurfaceError::Lost) => {
+            CurrentSurfaceTexture::Lost => {
                 warn!(
                     "Wayland surface for output {} lost; scheduling recreate",
                     output
@@ -306,25 +307,12 @@ pub(crate) fn present_wayland_surface(
                 entry.last_applied_generation = 0;
                 continue;
             }
-            Err(SurfaceError::Timeout) => {
+            CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => {
                 debug!("Wayland surface acquire timeout (output {})", output);
                 continue;
             }
-            Err(SurfaceError::OutOfMemory) => {
-                error!(
-                    "Wayland surface out of memory (output {}); disabling",
-                    output
-                );
-                entry.surface = None;
-                entry.config = None;
-                entry.last_applied_generation = 0;
-                continue;
-            }
-            Err(other) => {
-                warn!(
-                    "Unexpected Wayland surface error (output {}): {other:?}",
-                    output
-                );
+            CurrentSurfaceTexture::Validation => {
+                error!("Wayland surface validation failed (output {})", output);
                 continue;
             }
         };

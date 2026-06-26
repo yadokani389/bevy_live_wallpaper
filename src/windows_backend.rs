@@ -35,7 +35,7 @@ impl Plugin for WallpaperWindowsPlugin {
                 )
                     .chain(),
             )
-            .insert_non_send_resource(workerw);
+            .insert_non_send(workerw);
     }
 }
 
