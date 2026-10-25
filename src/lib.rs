@@ -20,6 +20,9 @@ pub mod surface_info;
 pub mod target_monitor;
 mod windowed_backend;
 
+#[cfg(any(target_os = "windows", test))]
+mod monitor_layout;
+
 #[cfg(any(feature = "wayland", feature = "x11"))]
 mod render_target;
 

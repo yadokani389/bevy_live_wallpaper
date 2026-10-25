@@ -1,11 +1,8 @@
-use crate::{
-    PointerSample, WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
-    input::detect_last_button,
-};
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, RawHandleWrapper};
 use raw_window_handle::RawWindowHandle;
-use std::collections::HashSet;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -19,6 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR};
 
+use crate::{
+    PointerSample, WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
+    input::detect_last_button, monitor_layout::MonitorLayout,
+};
+
 #[derive(Default)]
 pub(crate) struct WallpaperWindowsPlugin;
 
@@ -26,15 +28,7 @@ impl Plugin for WallpaperWindowsPlugin {
     fn build(&self, app: &mut App) {
         let workerw = find_workerw().expect("workerw not found.");
         app.add_systems(Startup, attach_wallpaper_windows_system)
-            .add_systems(
-                Update,
-                (
-                    update_window_position_and_size_system
-                        .run_if(resource_changed::<WallpaperTargetMonitor>),
-                    update_pointer_and_surface_info_system,
-                )
-                    .chain(),
-            )
+            .add_systems(Update, update_wallpaper_system)
             .insert_non_send(workerw);
     }
 }
@@ -67,144 +61,38 @@ fn attach_wallpaper_windows_system(
     }
 }
 
-fn update_window_position_and_size_system(
+fn update_wallpaper_system(
     target_monitor: Res<WallpaperTargetMonitor>,
-    monitors: Query<&Monitor>,
-    primary_monitor: Single<&Monitor, With<PrimaryMonitor>>,
+    monitors_query: Query<(&Monitor, Has<PrimaryMonitor>)>,
     mut window: Single<&mut Window>,
-) {
-    let Some((offset_x, offset_y)) = monitors
-        .into_iter()
-        .map(|m| (-m.physical_position.x, -m.physical_position.y))
-        .reduce(|(x0, y0), (x1, y1)| (x0.max(x1), y0.max(y1)))
-    else {
-        return;
-    };
-    let Some(scale) = monitors
-        .into_iter()
-        .map(|m| m.scale_factor as f32)
-        .reduce(f32::max)
-    else {
-        return;
-    };
-
-    let (pos_x, pos_y, width, height) = if let WallpaperTargetMonitor::All = *target_monitor {
-        let Some((max_x, max_y)) = monitors
-            .into_iter()
-            .map(|m| {
-                (
-                    m.physical_position.x + m.physical_width as i32,
-                    m.physical_position.y + m.physical_height as i32,
-                )
-            })
-            .reduce(|(x0, y0), (x1, y1)| (x0.max(x1), y0.max(y1)))
-        else {
-            return;
-        };
-        (
-            0,
-            0,
-            (max_x + offset_x) as f32 / scale,
-            (max_y + offset_y) as f32 / scale,
-        )
-    } else {
-        let Some(m) = (match *target_monitor {
-            WallpaperTargetMonitor::Primary => Some(*primary_monitor),
-            WallpaperTargetMonitor::Index(n) => monitors.iter().nth(n),
-            WallpaperTargetMonitor::All => None,
-        }) else {
-            return;
-        };
-        let pos = m.physical_position;
-
-        (
-            pos.x + offset_x,
-            pos.y + offset_y,
-            m.physical_width as f32 / scale,
-            m.physical_height as f32 / scale,
-        )
-    };
-
-    window.position.set(ivec2(pos_x, pos_y));
-    window.resolution.set(width, height);
-}
-
-fn update_pointer_and_surface_info_system(
-    target_monitor: Res<WallpaperTargetMonitor>,
-    monitors_query: Query<&Monitor>,
-    primary_monitor: Single<&Monitor, With<PrimaryMonitor>>,
     mut pointer_state: ResMut<WallpaperPointerState>,
     mut surface_info: ResMut<WallpaperSurfaceInfo>,
 ) {
-    let monitors: Vec<&Monitor> = monitors_query.iter().collect();
-    if monitors.is_empty() {
+    let monitors: Vec<&Monitor> = monitors_query.iter().map(|(monitor, _)| monitor).collect();
+    let primary = monitors_query
+        .iter()
+        .find(|(_, primary)| *primary)
+        .map(|(monitor, _)| monitor);
+    let Some(layout) = MonitorLayout::new(&monitors, primary, *target_monitor) else {
         return;
+    };
+
+    let position = bevy::window::WindowPosition::At(layout.position);
+    if window.position != position {
+        window.position = position;
     }
-
-    let Some(min_x) = monitors.iter().map(|m| m.physical_position.x).min() else {
-        return;
-    };
-    let Some(min_y) = monitors.iter().map(|m| m.physical_position.y).min() else {
-        return;
-    };
-    let Some(max_x) = monitors
-        .iter()
-        .map(|m| m.physical_position.x + m.physical_width as i32)
-        .max()
-    else {
-        return;
-    };
-    let Some(max_y) = monitors
-        .iter()
-        .map(|m| m.physical_position.y + m.physical_height as i32)
-        .max()
-    else {
-        return;
-    };
-    let Some(max_scale) = monitors
-        .iter()
-        .map(|m| m.scale_factor as f32)
-        .reduce(f32::max)
-    else {
-        return;
-    };
-    if max_scale <= 0.0 {
-        return;
+    let mut resolution = window.resolution.clone();
+    resolution.set(layout.size.x, layout.size.y);
+    if window.resolution != resolution {
+        window.resolution = resolution;
     }
-
-    let target_monitor_ref = match *target_monitor {
-        WallpaperTargetMonitor::Primary => Some(*primary_monitor),
-        WallpaperTargetMonitor::Index(n) => monitors.get(n).copied(),
-        WallpaperTargetMonitor::All => None,
-    };
-
-    let (origin_x, origin_y, logical_width, logical_height) = if let Some(m) = target_monitor_ref {
-        let width = ((m.physical_width as f32) / max_scale).ceil().max(1.0) as u32;
-        let height = ((m.physical_height as f32) / max_scale).ceil().max(1.0) as u32;
-        (m.physical_position.x, m.physical_position.y, width, height)
-    } else {
-        let width = ((max_x - min_x) as f32 / max_scale).ceil().max(1.0) as u32;
-        let height = ((max_y - min_y) as f32 / max_scale).ceil().max(1.0) as u32;
-        (min_x, min_y, width, height)
-    };
-
-    let logical_offset_x = ((origin_x - min_x) as f32 / max_scale).floor() as i32;
-    let logical_offset_y = ((origin_y - min_y) as f32 / max_scale).floor() as i32;
-    surface_info.set(
-        logical_offset_x,
-        logical_offset_y,
-        logical_width,
-        logical_height,
-    );
+    surface_info.set_if_neq(layout.surface_info());
 
     let Some((cursor_x, cursor_y)) = current_cursor_position() else {
         return;
     };
 
-    let logical_position = Vec2::new(
-        (cursor_x - min_x) as f32 / max_scale,
-        (cursor_y - min_y) as f32 / max_scale,
-    );
+    let logical_position = layout.logical_position(IVec2::new(cursor_x, cursor_y));
 
     let pressed = pressed_buttons();
     let last_button = detect_last_button(pointer_state.last.as_ref().map(|s| &s.pressed), &pressed);
