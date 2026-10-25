@@ -1,26 +1,26 @@
 use std::io::ErrorKind;
 
 use bevy::{
-    camera::RenderTarget,
+    camera::CameraUpdateSystems,
     prelude::*,
-    render::{
-        Render, RenderApp, RenderSystems, extract_resource::ExtractResourcePlugin,
-        render_resource::Extent3d,
-    },
+    render::{Render, RenderApp, RenderSystems, extract_resource::ExtractResourcePlugin},
 };
 use wayland_client::{Connection, EventQueue, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::{
-    LiveWallpaperCamera, PointerButton, PointerSample, WallpaperPointerState, WallpaperSurfaceInfo,
+    PointerButton, PointerSample, WallpaperPointerState, WallpaperSurfaceInfo,
     WallpaperTargetMonitor,
+    render_target::{
+        WallpaperRenderTarget, WallpaperRenderTargetPlugin, assign_wallpaper_camera_target,
+    },
 };
 
 use super::{
     PendingPointerEvent, WaylandAppState,
     render::{
-        WaylandGpuSurfaceState, WaylandRenderTarget, WaylandSurfaceDescriptor,
-        create_wayland_image, prepare_wayland_surface, present_wayland_surface,
+        WaylandGpuSurfaceState, WaylandSurfaceDescriptor, prepare_wayland_surface,
+        present_wayland_surface,
     },
 };
 
@@ -67,24 +67,19 @@ impl Plugin for WaylandBackendPlugin {
                     .after(RenderSystems::Render),
             );
 
-        let target_image = {
-            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            create_wayland_image(&mut images)
-        };
-
-        app.insert_resource(WaylandSurfaceDescriptor::new())
-            .insert_resource(WaylandRenderTarget::new(target_image))
+        app.init_resource::<WaylandSurfaceDescriptor>()
             .add_plugins((
                 ExtractResourcePlugin::<WaylandSurfaceDescriptor>::default(),
-                ExtractResourcePlugin::<WaylandRenderTarget>::default(),
+                WallpaperRenderTargetPlugin,
             ))
             .add_systems(PostUpdate, wayland_event_system)
             .add_systems(
                 PostUpdate,
                 (
                     sync_wayland_render_target_image.after(wayland_event_system),
-                    assign_wayland_camera_target.after(sync_wayland_render_target_image),
-                ),
+                    assign_wallpaper_camera_target.after(sync_wayland_render_target_image),
+                )
+                    .before(CameraUpdateSystems),
             )
             .insert_non_send(WaylandEventQueue(event_queue))
             .insert_non_send(app_state);
@@ -107,7 +102,6 @@ fn wayland_event_system(
             warn!("Wayland event dispatch failed: {err:?}; closing background surface");
             app_state.closed = true;
             surface_descriptor.surfaces.clear();
-            surface_descriptor.bump_generation();
             return;
         }
 
@@ -138,20 +132,14 @@ fn sync_surface_descriptor(
     descriptor: &mut WaylandSurfaceDescriptor,
     app_state: &mut WaylandAppState,
 ) {
-    let previous_len = descriptor.surfaces.len();
     descriptor
         .surfaces
         .retain(|surface| app_state.surfaces.contains_key(&surface.output));
-    let mut touched = previous_len != descriptor.surfaces.len();
 
     for config in app_state.take_surface_config() {
         descriptor.upsert_surface(config);
-        touched = true;
     }
-    touched |= apply_output_info_updates(descriptor, app_state);
-    if touched {
-        descriptor.bump_generation();
-    }
+    apply_output_info_updates(descriptor, app_state);
 }
 
 fn pump_wayland_events(
@@ -247,91 +235,35 @@ fn apply_pointer_events(
     }
 }
 
-/// Apply the latest logical position/size info to existing surface descriptors.
-/// Returns true if any descriptor changed.
 fn apply_output_info_updates(
     descriptor: &mut WaylandSurfaceDescriptor,
     app_state: &mut WaylandAppState,
-) -> bool {
-    if app_state.dirty_outputs.is_empty() {
-        return false;
-    }
-
-    let mut changed_any = false;
-
-    #[inline]
-    fn update_if<T: PartialEq + Copy>(dst: &mut T, src: T, changed: &mut bool) {
-        if *dst != src {
-            *dst = src;
-            *changed = true;
-        }
-    }
-
+) {
     for surface in &mut descriptor.surfaces {
         if !app_state.dirty_outputs.contains(&surface.output) {
             continue;
         }
-
         if let Some(info) = app_state.output_info.get(&surface.output) {
-            let mut changed = false;
-
-            update_if(&mut surface.offset_x, info.x, &mut changed);
-            update_if(&mut surface.offset_y, info.y, &mut changed);
-
+            surface.offset_x = info.x;
+            surface.offset_y = info.y;
             if info.width > 0 {
-                update_if(&mut surface.width, info.width as u32, &mut changed);
+                surface.width = info.width as u32;
             }
             if info.height > 0 {
-                update_if(&mut surface.height, info.height as u32, &mut changed);
+                surface.height = info.height as u32;
             }
-
-            changed_any |= changed;
         }
     }
-
     app_state.dirty_outputs.clear();
-    changed_any
 }
 
 fn sync_wayland_render_target_image(
     descriptor: Res<WaylandSurfaceDescriptor>,
-    mut target: ResMut<WaylandRenderTarget>,
+    target: Res<WallpaperRenderTarget>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let Some((_, _, width, height)) = descriptor.overall_bounds() else {
-        return;
-    };
-
-    if target.last_applied_generation == descriptor.generation {
-        return;
-    }
-
-    if let Some(mut image) = images.get_mut(&target.image) {
-        let size = Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
-        if image.texture_descriptor.size != size {
-            image.texture_descriptor.size = size;
-        }
-
-        image.resize(size);
-    }
-
-    target.last_applied_generation = descriptor.generation;
-}
-
-fn assign_wayland_camera_target(
-    target: Res<WaylandRenderTarget>,
-    mut commands: Commands,
-    cameras: Query<Entity, With<LiveWallpaperCamera>>,
-) {
-    for entity in &cameras {
-        commands
-            .entity(entity)
-            .insert(RenderTarget::Image(target.image.clone().into()));
+    if let Some((_, _, width, height)) = descriptor.overall_bounds() {
+        target.resize(&mut images, width, height);
     }
 }
 
@@ -481,13 +413,11 @@ mod tests {
 
         assert_eq!(descriptor.surfaces.len(), 1);
         assert_eq!(descriptor.surfaces[0].output, 20);
-        assert_eq!(descriptor.generation, 1);
         assert!(!state.outputs.contains_key(&10));
         assert!(!state.output_info.contains_key(&10));
         assert!(!state.surface_to_output.values().any(|output| *output == 10));
         assert_eq!(state.output_order, [20]);
         assert!(state.pointer_focus.is_none());
         sync_surface_descriptor(&mut descriptor, &mut state);
-        assert_eq!(descriptor.generation, 1);
     }
 }

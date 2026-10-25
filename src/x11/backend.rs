@@ -1,22 +1,19 @@
 use bevy::{
-    camera::RenderTarget,
+    camera::CameraUpdateSystems,
     prelude::*,
-    render::{
-        Render, RenderApp, RenderSystems, extract_resource::ExtractResourcePlugin,
-        render_resource::Extent3d,
-    },
+    render::{Render, RenderApp, RenderSystems, extract_resource::ExtractResourcePlugin},
 };
 
 use crate::{
-    LiveWallpaperCamera, WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
+    WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
+    render_target::{
+        WallpaperRenderTarget, WallpaperRenderTargetPlugin, assign_wallpaper_camera_target,
+    },
 };
 
 use super::{
     X11AppState,
-    render::{
-        X11GpuSurfaceState, X11RenderTarget, X11SurfaceDescriptor, create_x11_image,
-        prepare_x11_surface, present_x11_surface,
-    },
+    render::{X11GpuSurfaceState, X11SurfaceDescriptor, prepare_x11_surface, present_x11_surface},
 };
 
 #[derive(Default)]
@@ -55,24 +52,19 @@ impl Plugin for X11BackendPlugin {
                     .after(RenderSystems::Render),
             );
 
-        let target_image = {
-            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            create_x11_image(&mut images)
-        };
-
-        app.insert_resource(X11SurfaceDescriptor::new())
-            .insert_resource(X11RenderTarget::new(target_image))
+        app.init_resource::<X11SurfaceDescriptor>()
             .add_plugins((
                 ExtractResourcePlugin::<X11SurfaceDescriptor>::default(),
-                ExtractResourcePlugin::<X11RenderTarget>::default(),
+                WallpaperRenderTargetPlugin,
             ))
             .add_systems(PostUpdate, x11_event_system)
             .add_systems(
                 PostUpdate,
                 (
                     sync_x11_render_target_image.after(x11_event_system),
-                    assign_x11_camera_target.after(sync_x11_render_target_image),
-                ),
+                    assign_wallpaper_camera_target.after(sync_x11_render_target_image),
+                )
+                    .before(CameraUpdateSystems),
             )
             .insert_non_send(app_state);
     }
@@ -113,48 +105,13 @@ fn x11_event_system(
         surface_descriptor.handles = Some(surface_config.handles);
         surface_descriptor.width = surface_config.width;
         surface_descriptor.height = surface_config.height;
-        surface_descriptor.bump_generation();
     }
 }
 
 fn sync_x11_render_target_image(
     descriptor: Res<X11SurfaceDescriptor>,
-    mut target: ResMut<X11RenderTarget>,
+    target: Res<WallpaperRenderTarget>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    if descriptor.width == 0 || descriptor.height == 0 {
-        return;
-    }
-
-    if target.last_applied_generation == descriptor.generation {
-        return;
-    }
-
-    if let Some(mut image) = images.get_mut(&target.image) {
-        let size = Extent3d {
-            width: descriptor.width,
-            height: descriptor.height,
-            depth_or_array_layers: 1,
-        };
-
-        if image.texture_descriptor.size != size {
-            image.texture_descriptor.size = size;
-        }
-
-        image.resize(size);
-    }
-
-    target.last_applied_generation = descriptor.generation;
-}
-
-fn assign_x11_camera_target(
-    target: Res<X11RenderTarget>,
-    mut commands: Commands,
-    cameras: Query<Entity, With<LiveWallpaperCamera>>,
-) {
-    for entity in &cameras {
-        commands
-            .entity(entity)
-            .insert(RenderTarget::Image(target.image.clone().into()));
-    }
+    target.resize(&mut images, descriptor.width, descriptor.height);
 }

@@ -1,12 +1,11 @@
 use bevy::{
-    asset::RenderAssetUsages,
     log::{debug, error, warn},
-    prelude::{Assets, Handle, Image, Res, ResMut, Resource},
+    prelude::{Res, ResMut, Resource},
     render::{
         RenderApp,
         extract_resource::ExtractResource,
         render_asset::RenderAssets,
-        render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+        render_resource::{Extent3d, TextureUsages},
         renderer::{RenderAdapter, RenderDevice, RenderInstance, RenderQueue},
         texture::GpuImage,
     },
@@ -16,27 +15,10 @@ use wgpu::{
     SurfaceColorSpace, SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
-use crate::x11::surface::X11SurfaceHandles;
-
-pub const X11_SURFACE_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
-
-pub(crate) fn create_x11_image(images: &mut Assets<Image>) -> Handle<Image> {
-    let size = Extent3d {
-        width: 1,
-        height: 1,
-        depth_or_array_layers: 1,
-    };
-    let mut image = Image::new_fill(
-        size,
-        TextureDimension::D2,
-        &[0, 0, 0, 255],
-        X11_SURFACE_FORMAT,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC;
-    images.add(image)
-}
+use crate::{
+    render_target::{WALLPAPER_SURFACE_FORMAT, WallpaperRenderTarget},
+    x11::surface::X11SurfaceHandles,
+};
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
 #[extract_app(RenderApp)]
@@ -44,38 +26,6 @@ pub(crate) struct X11SurfaceDescriptor {
     pub handles: Option<X11SurfaceHandles>,
     pub width: u32,
     pub height: u32,
-    pub generation: u64,
-}
-
-impl X11SurfaceDescriptor {
-    pub(crate) fn new() -> Self {
-        Self {
-            handles: None,
-            width: 0,
-            height: 0,
-            generation: 0,
-        }
-    }
-
-    pub(crate) fn bump_generation(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-    }
-}
-
-#[derive(Resource, ExtractResource, Clone, Debug)]
-#[extract_app(RenderApp)]
-pub(crate) struct X11RenderTarget {
-    pub image: Handle<Image>,
-    pub last_applied_generation: u64,
-}
-
-impl X11RenderTarget {
-    pub(crate) fn new(image: Handle<Image>) -> Self {
-        Self {
-            image,
-            last_applied_generation: 0,
-        }
-    }
 }
 
 #[derive(Resource, Default)]
@@ -156,7 +106,7 @@ pub(crate) fn prepare_x11_surface(
             .formats
             .iter()
             .copied()
-            .find(|fmt| *fmt == X11_SURFACE_FORMAT)
+            .find(|fmt| *fmt == WALLPAPER_SURFACE_FORMAT)
             .or_else(|| capabilities.formats.first().copied())
             .expect("X11 surface has no supported formats");
 
@@ -199,7 +149,7 @@ pub(crate) fn prepare_x11_surface(
 
 pub(crate) fn present_x11_surface(
     mut state: ResMut<X11GpuSurfaceState>,
-    target: Option<Res<X11RenderTarget>>,
+    target: Option<Res<WallpaperRenderTarget>>,
     images: Res<RenderAssets<GpuImage>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,

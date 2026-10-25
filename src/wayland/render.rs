@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
 use bevy::{
-    asset::RenderAssetUsages,
     log::{debug, error, warn},
-    prelude::{Assets, Handle, Image, Res, ResMut, Resource},
+    prelude::{Res, ResMut, Resource},
     render::{
         RenderApp,
         extract_resource::ExtractResource,
         render_asset::RenderAssets,
-        render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+        render_resource::{Extent3d, TextureUsages},
         renderer::{RenderAdapter, RenderDevice, RenderInstance, RenderQueue},
         texture::GpuImage,
     },
@@ -18,43 +17,18 @@ use wgpu::{
     SurfaceColorSpace, SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
-use crate::wayland::surface::WaylandSurfaceHandles;
-
-pub(crate) const WAYLAND_SURFACE_FORMAT: TextureFormat = TextureFormat::Bgra8UnormSrgb;
-
-pub(crate) fn create_wayland_image(images: &mut Assets<Image>) -> Handle<Image> {
-    let size = Extent3d {
-        width: 1,
-        height: 1,
-        depth_or_array_layers: 1,
-    };
-    let mut image = Image::new_fill(
-        size,
-        TextureDimension::D2,
-        &[0, 0, 0, 255],
-        WAYLAND_SURFACE_FORMAT,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC;
-    images.add(image)
-}
+use crate::{
+    render_target::{WALLPAPER_SURFACE_FORMAT, WallpaperRenderTarget},
+    wayland::surface::WaylandSurfaceHandles,
+};
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
 #[extract_app(RenderApp)]
 pub(crate) struct WaylandSurfaceDescriptor {
     pub surfaces: Vec<SurfaceDescriptorEntry>,
-    pub generation: u64,
 }
 
 impl WaylandSurfaceDescriptor {
-    pub(crate) fn new() -> Self {
-        Self {
-            surfaces: Vec::new(),
-            generation: 0,
-        }
-    }
-
     pub(crate) fn upsert_surface(&mut self, config: crate::wayland::WaylandSurfaceConfig) {
         if let Some(entry) = self
             .surfaces
@@ -99,10 +73,6 @@ impl WaylandSurfaceDescriptor {
 
         Some((min_x, min_y, width, height))
     }
-
-    pub(crate) fn bump_generation(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -113,22 +83,6 @@ pub(crate) struct SurfaceDescriptorEntry {
     pub height: u32,
     pub offset_x: i32,
     pub offset_y: i32,
-}
-
-#[derive(Resource, ExtractResource, Clone, Debug)]
-#[extract_app(RenderApp)]
-pub(crate) struct WaylandRenderTarget {
-    pub image: Handle<Image>,
-    pub last_applied_generation: u64,
-}
-
-impl WaylandRenderTarget {
-    pub(crate) fn new(image: Handle<Image>) -> Self {
-        Self {
-            image,
-            last_applied_generation: 0,
-        }
-    }
 }
 
 #[derive(Resource, Default)]
@@ -206,7 +160,7 @@ pub(crate) fn prepare_wayland_surface(
                 .formats
                 .iter()
                 .copied()
-                .find(|fmt| *fmt == WAYLAND_SURFACE_FORMAT)
+                .find(|fmt| *fmt == WALLPAPER_SURFACE_FORMAT)
                 .or_else(|| capabilities.formats.first().copied())
                 .expect("Wayland surface has no supported formats");
 
@@ -251,7 +205,7 @@ pub(crate) fn prepare_wayland_surface(
 
 pub(crate) fn present_wayland_surface(
     mut state: ResMut<WaylandGpuSurfaceState>,
-    target: Option<Res<WaylandRenderTarget>>,
+    target: Option<Res<WallpaperRenderTarget>>,
     images: Res<RenderAssets<GpuImage>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
