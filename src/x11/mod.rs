@@ -23,7 +23,7 @@ use x11rb::{
 
 use self::surface::X11SurfaceHandles;
 
-use crate::{PointerButton, PointerSample, WallpaperTargetMonitor};
+use crate::{PointerSample, WallpaperTargetMonitor, input::detect_last_button};
 
 pub(crate) struct X11AppState {
     connection: XCBConnection,
@@ -434,43 +434,4 @@ fn pressed_buttons(mask: u16) -> HashSet<MouseButton> {
     // Ignore BUTTON_4/BUTTON_5 (scroll) to avoid treating wheel motion as held buttons.
 
     set
-}
-
-fn detect_last_button(
-    prev: Option<&HashSet<MouseButton>>,
-    current: &HashSet<MouseButton>,
-) -> Option<PointerButton> {
-    let empty = HashSet::new();
-    let prev = prev.unwrap_or(&empty);
-
-    let mut newly_pressed: Vec<MouseButton> = current.difference(prev).copied().collect();
-    if let Some(btn) = prioritize_button(&mut newly_pressed) {
-        return Some(PointerButton {
-            button: Some(btn),
-            pressed: true,
-        });
-    }
-
-    let mut released: Vec<MouseButton> = prev.difference(current).copied().collect();
-    if let Some(btn) = prioritize_button(&mut released) {
-        return Some(PointerButton {
-            button: Some(btn),
-            pressed: false,
-        });
-    }
-
-    None
-}
-
-fn prioritize_button(buttons: &mut Vec<MouseButton>) -> Option<MouseButton> {
-    // Deterministic priority similar to common UX expectations.
-    let priority = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
-
-    for p in priority {
-        if let Some(pos) = buttons.iter().position(|b| *b == p) {
-            return Some(buttons.swap_remove(pos));
-        }
-    }
-
-    buttons.pop()
 }

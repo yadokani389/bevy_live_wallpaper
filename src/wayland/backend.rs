@@ -109,16 +109,14 @@ fn wayland_event_system(
         ensure_surfaces_for_outputs(&mut app_state, &qh, &target_monitor);
         sync_surface_descriptor(&mut surface_descriptor, &mut app_state);
 
-        let had_pointer_events = !app_state.pending_pointer_events.is_empty();
+        if let Some(sample) = pointer_state.last.as_mut() {
+            sample.delta = Vec2::ZERO;
+            sample.last_button = None;
+        }
         apply_pointer_events(
             &mut pointer_state,
             app_state.pending_pointer_events.drain(..),
         );
-
-        if !had_pointer_events && let Some(sample) = pointer_state.last.as_mut() {
-            sample.delta = Vec2::ZERO;
-            sample.last_button = None;
-        }
 
         if let Some((min_x, min_y, w, h)) =
             ready_bounds(&surface_descriptor, &app_state, &target_monitor)
@@ -202,19 +200,14 @@ fn apply_pointer_events(
     pending: impl IntoIterator<Item = PendingPointerEvent>,
 ) {
     for evt in pending {
-        let prev_position = state
-            .last
-            .as_ref()
-            .map(|s| s.position)
-            .unwrap_or(evt.position + evt.offset);
         let new_position = evt.position + evt.offset;
-
-        let mut sample = PointerSample {
-            output: Some(evt.output),
+        let sample = state.last.get_or_insert_with(|| PointerSample {
             position: new_position,
-            delta: new_position - prev_position,
-            ..state.last.clone().unwrap_or_default()
-        };
+            ..default()
+        });
+        sample.output = Some(evt.output);
+        sample.delta = new_position - sample.position;
+        sample.position = new_position;
 
         sample.last_button = evt
             .kind
@@ -230,8 +223,6 @@ fn apply_pointer_events(
                 sample.pressed.remove(&button);
             }
         }
-
-        state.last = Some(sample);
     }
 }
 
@@ -359,6 +350,55 @@ mod tests {
     use super::*;
     use crate::wayland::{OutputInfo, OutputSurface, PointerFocus, render::SurfaceDescriptorEntry};
     use wayland_client::protocol::{wl_output, wl_surface};
+
+    #[test]
+    fn pointer_motion_preserves_buttons_without_repeating_button_changes() {
+        use crate::wayland::PendingPointerEventKind;
+
+        let mut state = WallpaperPointerState::default();
+        let event = |position, kind| PendingPointerEvent {
+            output: 10,
+            position,
+            offset: Vec2::new(-1920.0, 0.0),
+            kind,
+        };
+        apply_pointer_events(
+            &mut state,
+            [event(
+                Vec2::ZERO,
+                PendingPointerEventKind::Button {
+                    button: Some(MouseButton::Left),
+                    pressed: true,
+                },
+            )],
+        );
+        let sample = state.last.as_ref().unwrap();
+        assert_eq!(sample.position, Vec2::new(-1920.0, 0.0));
+        assert_eq!(sample.delta, Vec2::ZERO);
+        assert!(sample.pressed.contains(&MouseButton::Left));
+        apply_pointer_events(
+            &mut state,
+            [event(
+                Vec2::new(20.0, 30.0),
+                PendingPointerEventKind::Motion,
+            )],
+        );
+        let sample = state.last.as_ref().unwrap();
+        assert_eq!(sample.delta, Vec2::new(20.0, 30.0));
+        assert!(sample.pressed.contains(&MouseButton::Left));
+        assert!(sample.last_button.is_none());
+        apply_pointer_events(
+            &mut state,
+            [event(
+                Vec2::new(20.0, 30.0),
+                PendingPointerEventKind::Button {
+                    button: Some(MouseButton::Left),
+                    pressed: false,
+                },
+            )],
+        );
+        assert!(state.last.as_ref().unwrap().pressed.is_empty());
+    }
 
     #[test]
     fn removed_output_is_reconciled_after_registry_cleanup() {

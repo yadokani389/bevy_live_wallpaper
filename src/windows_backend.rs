@@ -1,6 +1,6 @@
 use crate::{
-    PointerButton, PointerSample, WallpaperPointerState, WallpaperSurfaceInfo,
-    WallpaperTargetMonitor,
+    PointerSample, WallpaperPointerState, WallpaperSurfaceInfo, WallpaperTargetMonitor,
+    input::detect_last_button,
 };
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, RawHandleWrapper};
@@ -263,44 +263,6 @@ fn pressed_buttons() -> HashSet<MouseButton> {
         }
     }
     set
-}
-
-fn detect_last_button(
-    prev: Option<&HashSet<MouseButton>>,
-    current: &HashSet<MouseButton>,
-) -> Option<PointerButton> {
-    let empty = HashSet::new();
-    let prev = prev.unwrap_or(&empty);
-
-    let mut newly_pressed: Vec<MouseButton> = current.difference(prev).copied().collect();
-    if let Some(btn) = prioritize_button(&mut newly_pressed) {
-        return Some(PointerButton {
-            button: Some(btn),
-            pressed: true,
-        });
-    }
-
-    let mut released: Vec<MouseButton> = prev.difference(current).copied().collect();
-    if let Some(btn) = prioritize_button(&mut released) {
-        return Some(PointerButton {
-            button: Some(btn),
-            pressed: false,
-        });
-    }
-
-    None
-}
-
-fn prioritize_button(buttons: &mut Vec<MouseButton>) -> Option<MouseButton> {
-    let priority = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
-
-    for p in priority {
-        if let Some(pos) = buttons.iter().position(|b| *b == p) {
-            return Some(buttons.swap_remove(pos));
-        }
-    }
-
-    buttons.pop()
 }
 
 fn to_wide_null(s: &str) -> Vec<u16> {

@@ -73,36 +73,26 @@ fn windowed_backend_system(
         latest_height.max(1.0) as u32,
     );
 
-    let mut saw_cursor_event = false;
-    let mut saw_button_event = false;
+    if let Some(sample) = pointer_state.last.as_mut() {
+        sample.delta = Vec2::ZERO;
+        sample.last_button = None;
+    }
 
     // Track cursor movement in logical coordinates relative to desktop by adding offset.
     for evt in params.cursor_moved_events.read() {
         if evt.window != window_entity {
             continue;
         }
-        saw_cursor_event = true;
 
         let global_position = evt.position + state.logical_offset;
-        let prev_position = pointer_state
-            .last
-            .as_ref()
-            .map(|p| p.position)
-            .unwrap_or(global_position);
-
-        let pressed = pointer_state
-            .last
-            .as_ref()
-            .map(|p| p.pressed.clone())
-            .unwrap_or_default();
-
-        pointer_state.last = Some(PointerSample {
-            output: None,
+        let sample = pointer_state.last.get_or_insert_with(|| PointerSample {
             position: global_position,
-            delta: global_position - prev_position,
-            last_button: None,
-            pressed,
+            ..default()
         });
+        sample.output = None;
+        sample.delta = global_position - sample.position;
+        sample.position = global_position;
+        sample.last_button = None;
     }
 
     // Mouse buttons are handled separately so clicks without movement still update state.
@@ -110,46 +100,106 @@ fn windowed_backend_system(
         if evt.window != window_entity {
             continue;
         }
-        saw_button_event = true;
 
-        let mut pressed = pointer_state
-            .last
-            .as_ref()
-            .map(|p| p.pressed.clone())
-            .unwrap_or_default();
-
+        let sample = pointer_state.last.get_or_insert_with(|| PointerSample {
+            position: state.logical_offset,
+            ..default()
+        });
         match evt.state {
             ButtonState::Pressed => {
-                pressed.insert(evt.button);
+                sample.pressed.insert(evt.button);
             }
             ButtonState::Released => {
-                pressed.remove(&evt.button);
+                sample.pressed.remove(&evt.button);
             }
         }
 
-        let position = pointer_state
-            .last
-            .as_ref()
-            .map(|p| p.position)
-            .unwrap_or(state.logical_offset);
-
-        pointer_state.last = Some(PointerSample {
-            output: None,
-            position,
-            delta: Vec2::ZERO,
-            last_button: Some(PointerButton {
-                button: Some(evt.button),
-                pressed: evt.state == ButtonState::Pressed,
-            }),
-            pressed,
+        sample.output = None;
+        sample.delta = Vec2::ZERO;
+        sample.last_button = Some(PointerButton {
+            button: Some(evt.button),
+            pressed: evt.state == ButtonState::Pressed,
         });
     }
+}
 
-    if !saw_cursor_event
-        && !saw_button_event
-        && let Some(sample) = pointer_state.last.as_mut()
-    {
-        sample.delta = Vec2::ZERO;
-        sample.last_button = None;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pointer_updates_keep_held_buttons_and_clear_transient_state() {
+        let mut app = App::new();
+        app.init_resource::<WallpaperPointerState>()
+            .init_resource::<WallpaperSurfaceInfo>()
+            .add_message::<CursorMoved>()
+            .add_message::<MouseButtonInput>()
+            .add_message::<WindowMoved>()
+            .add_message::<WindowResized>()
+            .add_plugins(WindowedBackendPlugin);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut().write_message(WindowMoved {
+            window,
+            position: IVec2::new(-100, 50),
+        });
+        app.world_mut().write_message(MouseButtonInput {
+            window,
+            button: MouseButton::Left,
+            state: ButtonState::Pressed,
+        });
+        app.update();
+        let sample = app
+            .world()
+            .resource::<WallpaperPointerState>()
+            .last
+            .as_ref()
+            .unwrap();
+        assert_eq!(sample.position, Vec2::new(-100.0, 50.0));
+        assert!(sample.pressed.contains(&MouseButton::Left));
+        assert!(sample.last_button.unwrap().pressed);
+
+        app.world_mut().write_message(CursorMoved {
+            window,
+            position: Vec2::new(30.0, 40.0),
+            delta: None,
+        });
+        app.update();
+        let sample = app
+            .world()
+            .resource::<WallpaperPointerState>()
+            .last
+            .as_ref()
+            .unwrap();
+        assert_eq!(sample.position, Vec2::new(-70.0, 90.0));
+        assert_eq!(sample.delta, Vec2::new(30.0, 40.0));
+        assert!(sample.pressed.contains(&MouseButton::Left));
+        assert!(sample.last_button.is_none());
+
+        app.update();
+        let sample = app
+            .world()
+            .resource::<WallpaperPointerState>()
+            .last
+            .as_ref()
+            .unwrap();
+        assert_eq!(sample.delta, Vec2::ZERO);
+        assert!(sample.pressed.contains(&MouseButton::Left));
+        app.world_mut().write_message(MouseButtonInput {
+            window,
+            button: MouseButton::Left,
+            state: ButtonState::Released,
+        });
+        app.update();
+        let sample = app
+            .world()
+            .resource::<WallpaperPointerState>()
+            .last
+            .as_ref()
+            .unwrap();
+        assert!(sample.pressed.is_empty());
+        assert!(!sample.last_button.unwrap().pressed);
     }
 }
