@@ -5,6 +5,7 @@ use bevy::{
     log::{debug, error, warn},
     prelude::{Assets, Handle, Image, Res, ResMut, Resource},
     render::{
+        RenderApp,
         extract_resource::ExtractResource,
         render_asset::RenderAssets,
         render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
@@ -14,7 +15,7 @@ use bevy::{
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Origin3d, PresentMode,
-    SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
+    SurfaceColorSpace, SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
 use crate::wayland::surface::WaylandSurfaceHandles;
@@ -40,6 +41,7 @@ pub(crate) fn create_wayland_image(images: &mut Assets<Image>) -> Handle<Image> 
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
+#[extract_app(RenderApp)]
 pub(crate) struct WaylandSurfaceDescriptor {
     pub surfaces: Vec<SurfaceDescriptorEntry>,
     pub generation: u64,
@@ -114,6 +116,7 @@ pub(crate) struct SurfaceDescriptorEntry {
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug)]
+#[extract_app(RenderApp)]
 pub(crate) struct WaylandRenderTarget {
     pub image: Handle<Image>,
     pub last_applied_generation: u64,
@@ -162,9 +165,8 @@ pub(crate) fn prepare_wayland_surface(
             let handles = surf_desc.handles.expect("handles exist");
             let raw_display_handle = handles.raw_display_handle();
             let raw_window_handle = handles.raw_window_handle();
-            let instance = render_instance.0.as_ref();
             let surface = unsafe {
-                instance
+                render_instance
                     .create_surface_unsafe(SurfaceTargetUnsafe::RawHandle {
                         raw_display_handle: Some(raw_display_handle),
                         raw_window_handle,
@@ -188,7 +190,7 @@ pub(crate) fn prepare_wayland_surface(
             .unwrap_or(true);
 
         if needs_reconfigure || needs_recreate {
-            let capabilities = surface.get_capabilities(render_adapter.0.as_ref());
+            let capabilities = surface.get_capabilities(&render_adapter);
             if capabilities.formats.is_empty() {
                 warn!("Wayland surface reported no supported formats; retrying later");
                 entry.surface = None;
@@ -234,6 +236,7 @@ pub(crate) fn prepare_wayland_surface(
                 alpha_mode,
                 view_formats: vec![],
                 desired_maximum_frame_latency: 1,
+                color_space: SurfaceColorSpace::Auto,
             };
 
             render_device.configure_surface(surface, &config);
@@ -340,6 +343,6 @@ pub(crate) fn present_wayland_surface(
         encoder.copy_texture_to_texture(src, dst, extent);
 
         render_queue.submit(Some(encoder.finish()));
-        surface_texture.present();
+        render_queue.present(surface_texture);
     }
 }

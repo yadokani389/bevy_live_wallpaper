@@ -63,7 +63,9 @@ impl Plugin for WaylandBackendPlugin {
             )
             .add_systems(
                 Render,
-                present_wayland_surface.in_set(RenderSystems::Cleanup),
+                present_wayland_surface
+                    .in_set(RenderSystems::Cleanup)
+                    .after(RenderSystems::Render),
             );
 
         let target_image = {

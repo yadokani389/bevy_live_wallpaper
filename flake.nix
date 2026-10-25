@@ -87,6 +87,7 @@
               libXcursor
               libXi
               libXrandr
+              libxcb
             ];
 
             postInstall =

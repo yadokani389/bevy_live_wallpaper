@@ -48,7 +48,12 @@ impl Plugin for X11BackendPlugin {
                 Render,
                 prepare_x11_surface.in_set(RenderSystems::PrepareResources),
             )
-            .add_systems(Render, present_x11_surface.in_set(RenderSystems::Cleanup));
+            .add_systems(
+                Render,
+                present_x11_surface
+                    .in_set(RenderSystems::Cleanup)
+                    .after(RenderSystems::Render),
+            );
 
         let target_image = {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();

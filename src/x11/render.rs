@@ -3,6 +3,7 @@ use bevy::{
     log::{debug, error, warn},
     prelude::{Assets, Handle, Image, Res, ResMut, Resource},
     render::{
+        RenderApp,
         extract_resource::ExtractResource,
         render_asset::RenderAssets,
         render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
@@ -12,7 +13,7 @@ use bevy::{
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Origin3d, PresentMode,
-    SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
+    SurfaceColorSpace, SurfaceConfiguration, SurfaceTargetUnsafe, TextureAspect,
 };
 
 use crate::x11::surface::X11SurfaceHandles;
@@ -38,6 +39,7 @@ pub(crate) fn create_x11_image(images: &mut Assets<Image>) -> Handle<Image> {
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
+#[extract_app(RenderApp)]
 pub(crate) struct X11SurfaceDescriptor {
     pub handles: Option<X11SurfaceHandles>,
     pub width: u32,
@@ -61,6 +63,7 @@ impl X11SurfaceDescriptor {
 }
 
 #[derive(Resource, ExtractResource, Clone, Debug)]
+#[extract_app(RenderApp)]
 pub(crate) struct X11RenderTarget {
     pub image: Handle<Image>,
     pub last_applied_generation: u64,
@@ -116,9 +119,8 @@ pub(crate) fn prepare_x11_surface(
         let handles = descriptor.handles.expect("handles exist");
         let raw_display_handle = handles.raw_display_handle();
         let raw_window_handle = handles.raw_window_handle();
-        let instance = render_instance.0.as_ref();
         let surface = unsafe {
-            instance
+            render_instance
                 .create_surface_unsafe(SurfaceTargetUnsafe::RawHandle {
                     raw_display_handle: Some(raw_display_handle),
                     raw_window_handle,
@@ -142,7 +144,7 @@ pub(crate) fn prepare_x11_surface(
         .unwrap_or(true);
 
     if needs_reconfigure || needs_recreate {
-        let capabilities = surface.get_capabilities(render_adapter.0.as_ref());
+        let capabilities = surface.get_capabilities(&render_adapter);
         if capabilities.formats.is_empty() {
             warn!("X11 surface reported no supported formats; retrying later");
             state.mark_stale();
@@ -185,6 +187,7 @@ pub(crate) fn prepare_x11_surface(
             alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
+            color_space: SurfaceColorSpace::Auto,
         };
 
         render_device.configure_surface(surface, &config);
@@ -259,5 +262,5 @@ pub(crate) fn present_x11_surface(
     );
 
     render_queue.submit(Some(encoder.finish()));
-    surface_texture.present();
+    render_queue.present(surface_texture);
 }
