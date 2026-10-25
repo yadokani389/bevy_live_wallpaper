@@ -2,11 +2,13 @@ pub mod backend;
 pub mod render;
 pub mod surface;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use bevy::prelude::*;
 use wayland_client::Proxy;
-use wayland_client::protocol::wl_display;
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
     protocol::{
@@ -33,7 +35,7 @@ pub(crate) struct WaylandAppState {
     pub pending_pointer_events: Vec<PendingPointerEvent>,
     pub pointer_focus: Option<PointerFocus>,
     // Wayland objects
-    pub display: wl_display::WlDisplay,
+    pub connection: Connection,
     pub compositor: Option<(wl_compositor::WlCompositor, u32)>,
     pub layer_shell: Option<(zwlr_layer_shell_v1::ZwlrLayerShellV1, u32)>,
     pub seats: HashMap<u32, wl_seat::WlSeat>,
@@ -41,15 +43,30 @@ pub(crate) struct WaylandAppState {
     pub outputs: HashMap<u32, wl_output::WlOutput>,
     pub output_info: HashMap<u32, OutputInfo>,
     pub output_order: Vec<u32>,
-    pub surfaces: HashMap<u32, OutputSurface>,
+    pub surfaces: HashMap<u32, Arc<OutputSurface>>,
     pub surface_to_output: HashMap<u32, u32>,
     pub xdg_output_manager: Option<zxdg_output_manager_v1::ZxdgOutputManagerV1>,
     pub xdg_outputs: HashMap<u32, zxdg_output_v1::ZxdgOutputV1>,
 }
 
+#[derive(Debug)]
 pub(crate) struct OutputSurface {
     pub surface: wl_surface::WlSurface,
     pub layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    connection: Connection,
+}
+
+impl OutputSurface {
+    fn handles(&self) -> WaylandSurfaceHandles {
+        WaylandSurfaceHandles::new(&self.connection.display(), &self.surface)
+    }
+}
+
+impl Drop for OutputSurface {
+    fn drop(&mut self) {
+        self.layer_surface.destroy();
+        self.surface.destroy();
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -89,14 +106,14 @@ pub(crate) struct OutputInfo {
 }
 
 impl WaylandAppState {
-    pub(crate) fn new(display: wl_display::WlDisplay) -> Self {
+    pub(crate) fn new(connection: Connection) -> Self {
         Self {
             closed: false,
             pending_surface_config: Vec::new(),
             dirty_outputs: HashSet::new(),
             pending_pointer_events: Vec::new(),
             pointer_focus: None,
-            display,
+            connection,
             compositor: None,
             layer_shell: None,
             seats: HashMap::new(),
@@ -112,10 +129,7 @@ impl WaylandAppState {
     }
 
     fn remove_surface(&mut self, output: u32) {
-        if let Some(surface) = self.surfaces.remove(&output) {
-            surface.layer_surface.destroy();
-            surface.surface.destroy();
-        }
+        self.surfaces.remove(&output);
         self.surface_to_output.retain(|_, id| *id != output);
         self.pending_surface_config
             .retain(|config| config.output != output);
@@ -154,10 +168,11 @@ impl WaylandAppState {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct WaylandSurfaceConfig {
     pub output: u32,
     pub handles: WaylandSurfaceHandles,
+    pub owner: Arc<OutputSurface>,
     pub width: u32,
     pub height: u32,
     pub offset_x: i32,
@@ -426,7 +441,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for WaylandAppState
                             .or_insert_with(|| manager.get_xdg_output(wl_output, qh, *output));
                     }
 
-                    let handles = WaylandSurfaceHandles::new(&state.display, &surf.surface);
+                    let handles = surf.handles();
                     let width = width.max(1);
                     let height = height.max(1);
                     let (offset_x, offset_y) = state
@@ -437,6 +452,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for WaylandAppState
                     state.queue_surface_config(WaylandSurfaceConfig {
                         output: *output,
                         handles,
+                        owner: surf.clone(),
                         width,
                         height,
                         offset_x,

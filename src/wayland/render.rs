@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use bevy::{
     log::{debug, error, warn},
@@ -19,7 +19,7 @@ use wgpu::{
 
 use crate::{
     render_target::{WALLPAPER_SURFACE_FORMAT, WallpaperRenderTarget},
-    wayland::surface::WaylandSurfaceHandles,
+    wayland::{OutputSurface, surface::WaylandSurfaceHandles},
 };
 
 #[derive(Resource, ExtractResource, Clone, Debug, Default)]
@@ -36,6 +36,7 @@ impl WaylandSurfaceDescriptor {
             .find(|entry| entry.output == config.output)
         {
             entry.handles = Some(config.handles);
+            entry.owner = config.owner;
             entry.width = config.width;
             entry.height = config.height;
             entry.offset_x = config.offset_x;
@@ -44,6 +45,7 @@ impl WaylandSurfaceDescriptor {
             self.surfaces.push(SurfaceDescriptorEntry {
                 output: config.output,
                 handles: Some(config.handles),
+                owner: config.owner,
                 width: config.width,
                 height: config.height,
                 offset_x: config.offset_x,
@@ -79,6 +81,7 @@ impl WaylandSurfaceDescriptor {
 pub(crate) struct SurfaceDescriptorEntry {
     pub output: u32,
     pub handles: Option<WaylandSurfaceHandles>,
+    pub owner: Arc<OutputSurface>,
     pub width: u32,
     pub height: u32,
     pub offset_x: i32,
@@ -94,7 +97,8 @@ pub(crate) struct WaylandGpuSurfaceState {
 pub(crate) struct WaylandGpuPerSurface {
     pub surface: Option<wgpu::Surface<'static>>,
     pub config: Option<SurfaceConfiguration>,
-    pub handles: Option<WaylandSurfaceHandles>,
+    // Field order keeps native objects alive until the GPU surface has been dropped.
+    pub owner: Option<Arc<OutputSurface>>,
 }
 
 pub(crate) fn prepare_wayland_surface(
@@ -114,7 +118,11 @@ pub(crate) fn prepare_wayland_surface(
     for surf_desc in descriptor.surfaces.iter().filter(|s| s.handles.is_some()) {
         let entry = state.surfaces.entry(surf_desc.output).or_default();
 
-        let needs_recreate = entry.surface.is_none() || entry.handles != surf_desc.handles;
+        let needs_recreate = entry.surface.is_none()
+            || entry
+                .owner
+                .as_ref()
+                .is_none_or(|owner| !Arc::ptr_eq(owner, &surf_desc.owner));
 
         if needs_recreate {
             let handles = surf_desc.handles.expect("handles exist");
@@ -129,7 +137,7 @@ pub(crate) fn prepare_wayland_surface(
                     .expect("failed to create Wayland wgpu surface")
             };
             entry.surface = Some(surface);
-            entry.handles = Some(handles);
+            entry.owner = Some(surf_desc.owner.clone());
             entry.config = None;
         }
 
@@ -152,7 +160,7 @@ pub(crate) fn prepare_wayland_surface(
                 warn!("Wayland surface reported no supported formats; retrying later");
                 entry.surface = None;
                 entry.config = None;
-                entry.handles = None;
+                entry.owner = None;
                 continue;
             }
 
@@ -261,7 +269,7 @@ pub(crate) fn present_wayland_surface(
                 );
                 entry.surface = None;
                 entry.config = None;
-                entry.handles = None;
+                entry.owner = None;
                 continue;
             }
             CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => {

@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, sync::Arc};
 
 use bevy::{
     camera::CameraUpdateSystems,
@@ -35,7 +35,7 @@ impl Plugin for WaylandBackendPlugin {
         let display = conn.display();
         display.get_registry(&qh, ());
 
-        let mut app_state = WaylandAppState::new(display.clone());
+        let mut app_state = WaylandAppState::new(conn);
 
         info!("Waiting for globals...");
         event_queue.roundtrip(&mut app_state).unwrap();
@@ -304,10 +304,11 @@ fn ensure_surfaces_for_outputs(
         surface.commit();
         app_state.surfaces.insert(
             *output_name,
-            super::OutputSurface {
+            Arc::new(super::OutputSurface {
                 surface: surface.clone(),
                 layer_surface,
-            },
+                connection: app_state.connection.clone(),
+            }),
         );
         app_state.surface_to_output.insert(surface_id, *output_name);
     }
@@ -405,7 +406,7 @@ mod tests {
         let (socket, _server) = UnixStream::pair().unwrap();
         let connection = Connection::from_socket(socket).unwrap();
         let backend = connection.backend().downgrade();
-        let mut state = WaylandAppState::new(connection.display());
+        let mut state = WaylandAppState::new(connection.clone());
         let mut descriptor = WaylandSurfaceDescriptor::default();
         for output in [10, 20] {
             state
@@ -416,17 +417,19 @@ mod tests {
             state.dirty_outputs.insert(output);
             state.surfaces.insert(
                 output,
-                OutputSurface {
+                Arc::new(OutputSurface {
                     surface: wl_surface::WlSurface::inert(backend.clone()),
                     layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1::inert(
                         backend.clone(),
                     ),
-                },
+                    connection: connection.clone(),
+                }),
             );
             state.surface_to_output.insert(output + 100, output);
             descriptor.surfaces.push(SurfaceDescriptorEntry {
                 output,
                 handles: None,
+                owner: state.surfaces[&output].clone(),
                 width: 1920,
                 height: 1080,
                 offset_x: 0,
@@ -448,6 +451,8 @@ mod tests {
         );
         assert_eq!(state.output_info[&20].scale, 2);
         assert_eq!(state.output_info.len(), 2);
+        let removed = Arc::downgrade(&state.surfaces[&10]);
+        let render_snapshot = descriptor.clone();
         state.remove_output(10);
         sync_surface_descriptor(&mut descriptor, &mut state);
 
@@ -458,6 +463,9 @@ mod tests {
         assert!(!state.surface_to_output.values().any(|output| *output == 10));
         assert_eq!(state.output_order, [20]);
         assert!(state.pointer_focus.is_none());
+        assert!(removed.upgrade().is_some());
+        drop(render_snapshot);
+        assert!(removed.upgrade().is_none());
         sync_surface_descriptor(&mut descriptor, &mut state);
     }
 }
