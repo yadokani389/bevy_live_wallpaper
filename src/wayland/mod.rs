@@ -111,6 +111,36 @@ impl WaylandAppState {
         }
     }
 
+    fn remove_surface(&mut self, output: u32) {
+        if let Some(surface) = self.surfaces.remove(&output) {
+            surface.layer_surface.destroy();
+            surface.surface.destroy();
+        }
+        self.surface_to_output.retain(|_, id| *id != output);
+        self.pending_surface_config
+            .retain(|config| config.output != output);
+        self.pending_pointer_events
+            .retain(|event| event.output != output);
+        if self
+            .pointer_focus
+            .as_ref()
+            .is_some_and(|focus| focus.output == output)
+        {
+            self.pointer_focus = None;
+        }
+    }
+
+    fn remove_output(&mut self, output: u32) {
+        self.remove_surface(output);
+        self.outputs.remove(&output);
+        self.output_info.remove(&output);
+        self.output_order.retain(|id| *id != output);
+        self.dirty_outputs.remove(&output);
+        if let Some(xdg) = self.xdg_outputs.remove(&output) {
+            xdg.destroy();
+        }
+    }
+
     pub(crate) fn is_running(&self) -> bool {
         !self.closed
     }
@@ -164,7 +194,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandAppState {
                     "wl_output" => {
                         info!("Output found: {} (version {})", name, version);
                         let output =
-                            registry.bind::<wl_output::WlOutput, _, _>(name, version, qh, ());
+                            registry.bind::<wl_output::WlOutput, _, _>(name, version, qh, name);
                         state.outputs.insert(name, output);
                         state.output_order.push(name);
                     }
@@ -187,22 +217,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandAppState {
                     warn!("Compositor {} removed", name);
                     state.compositor = None;
                 }
-                if state.outputs.remove(&name).is_some() {
+                if state.outputs.contains_key(&name) {
                     warn!("Output {} removed", name);
-                    state.surfaces.remove(&name);
-                    state.surface_to_output.retain(|_, output| *output != name);
-                    state.output_order.retain(|n| *n != name);
-                    if state
-                        .pointer_focus
-                        .as_ref()
-                        .map(|focus| focus.output == name)
-                        .unwrap_or(false)
-                    {
-                        state.pointer_focus = None;
-                    }
-                    if let Some(xdg) = state.xdg_outputs.remove(&name) {
-                        xdg.destroy();
-                    }
+                    state.remove_output(name);
                 }
                 if let Some(seat) = state.seats.remove(&name) {
                     warn!("Seat {} removed", name);
@@ -492,41 +509,32 @@ impl Dispatch<wl_surface::WlSurface, ()> for WaylandAppState {
     }
 }
 
-impl Dispatch<wl_output::WlOutput, ()> for WaylandAppState {
+impl Dispatch<wl_output::WlOutput, u32> for WaylandAppState {
     fn event(
         state: &mut Self,
-        output: &wl_output::WlOutput,
+        _output: &wl_output::WlOutput,
         event: wl_output::Event,
-        _data: &(),
+        output_name: &u32,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
         match event {
             wl_output::Event::Geometry { x, y, .. } => {
-                let info = state
-                    .output_info
-                    .entry(output.id().protocol_id())
-                    .or_default();
+                let info = state.output_info.entry(*output_name).or_default();
                 info.x = x;
                 info.y = y;
-                state.dirty_outputs.insert(output.id().protocol_id());
+                state.dirty_outputs.insert(*output_name);
             }
             wl_output::Event::Mode { width, height, .. } => {
-                let info = state
-                    .output_info
-                    .entry(output.id().protocol_id())
-                    .or_default();
+                let info = state.output_info.entry(*output_name).or_default();
                 info.width = width;
                 info.height = height;
-                state.dirty_outputs.insert(output.id().protocol_id());
+                state.dirty_outputs.insert(*output_name);
             }
             wl_output::Event::Scale { factor } => {
-                let info = state
-                    .output_info
-                    .entry(output.id().protocol_id())
-                    .or_default();
+                let info = state.output_info.entry(*output_name).or_default();
                 info.scale = factor;
-                state.dirty_outputs.insert(output.id().protocol_id());
+                state.dirty_outputs.insert(*output_name);
             }
             _ => {}
         }

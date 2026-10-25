@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::ErrorKind;
 
 use bevy::{
@@ -113,33 +112,8 @@ fn wayland_event_system(
         }
 
         let qh = event_queue.handle();
-        let (mut touched, removed) =
-            ensure_surfaces_for_outputs(&mut app_state, &qh, &target_monitor);
-
-        if !removed.is_empty() {
-            surface_descriptor
-                .surfaces
-                .retain(|s| !removed.contains(&s.output));
-            touched = true;
-        }
-
-        for surface_config in app_state.take_surface_config() {
-            info!(
-                "Wayland surface configured (output {}): {}x{}",
-                surface_config.output, surface_config.width, surface_config.height
-            );
-            surface_descriptor.upsert_surface(surface_config);
-            touched = true;
-        }
-
-        // Integrate fresh logical positions/sizes from xdg-output / wl_output.
-        if apply_output_info_updates(&mut surface_descriptor, &mut app_state) {
-            touched = true;
-        }
-
-        if touched {
-            surface_descriptor.bump_generation();
-        }
+        ensure_surfaces_for_outputs(&mut app_state, &qh, &target_monitor);
+        sync_surface_descriptor(&mut surface_descriptor, &mut app_state);
 
         let had_pointer_events = !app_state.pending_pointer_events.is_empty();
         apply_pointer_events(
@@ -157,6 +131,26 @@ fn wayland_event_system(
         {
             surface_info.set(min_x, min_y, w, h);
         }
+    }
+}
+
+fn sync_surface_descriptor(
+    descriptor: &mut WaylandSurfaceDescriptor,
+    app_state: &mut WaylandAppState,
+) {
+    let previous_len = descriptor.surfaces.len();
+    descriptor
+        .surfaces
+        .retain(|surface| app_state.surfaces.contains_key(&surface.output));
+    let mut touched = previous_len != descriptor.surfaces.len();
+
+    for config in app_state.take_surface_config() {
+        descriptor.upsert_surface(config);
+        touched = true;
+    }
+    touched |= apply_output_info_updates(descriptor, app_state);
+    if touched {
+        descriptor.bump_generation();
     }
 }
 
@@ -341,26 +335,21 @@ fn assign_wayland_camera_target(
     }
 }
 
-/// Ensure we have a layer-surface for every known output.
-/// Returns (touched, removed_outputs).
 fn ensure_surfaces_for_outputs(
     app_state: &mut WaylandAppState,
     qh: &QueueHandle<WaylandAppState>,
     target: &WallpaperTargetMonitor,
-) -> (bool, Vec<u32>) {
-    let mut touched = false;
-    let mut removed: Vec<u32> = Vec::new();
-
+) {
     let Some(compositor) = app_state.compositor.as_ref() else {
-        return (touched, removed);
+        return;
     };
     let Some(layer_shell) = app_state.layer_shell.as_ref() else {
-        return (touched, removed);
+        return;
     };
 
     let Some(selected) = selected_outputs(app_state, target) else {
         // Invalid selection (e.g., Index out of range); keep current surfaces as-is.
-        return (touched, removed);
+        return;
     };
 
     // create missing surfaces
@@ -398,31 +387,16 @@ fn ensure_surfaces_for_outputs(
             },
         );
         app_state.surface_to_output.insert(surface_id, *output_name);
-        touched = true;
     }
-
-    // remove surfaces whose outputs vanished
-    let outputs: HashSet<u32> = selected.into_iter().collect();
     let to_remove: Vec<u32> = app_state
         .surfaces
         .keys()
-        .filter(|k| !outputs.contains(k))
+        .filter(|key| !selected.contains(key))
         .copied()
         .collect();
-    for key in to_remove {
-        if let Some(surface) = app_state.surfaces.remove(&key) {
-            // Explicitly destroy to stop showing on that output.
-            surface.layer_surface.destroy();
-            surface.surface.destroy();
-            app_state
-                .surface_to_output
-                .remove(&surface.surface.id().protocol_id());
-        }
-        touched = true;
-        removed.push(key);
+    for output in to_remove {
+        app_state.remove_surface(output);
     }
-
-    (touched, removed)
 }
 
 /// Choose outputs according to target monitor selection.
@@ -443,5 +417,77 @@ fn selected_outputs(
             let v: Vec<u32> = outputs.into_iter().skip(*n).take(1).collect();
             if v.is_empty() { None } else { Some(v) }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::net::UnixStream;
+
+    use super::*;
+    use crate::wayland::{OutputInfo, OutputSurface, PointerFocus, render::SurfaceDescriptorEntry};
+    use wayland_client::protocol::{wl_output, wl_surface};
+
+    #[test]
+    fn removed_output_is_reconciled_after_registry_cleanup() {
+        let (socket, _server) = UnixStream::pair().unwrap();
+        let connection = Connection::from_socket(socket).unwrap();
+        let backend = connection.backend().downgrade();
+        let mut state = WaylandAppState::new(connection.display());
+        let mut descriptor = WaylandSurfaceDescriptor::default();
+        for output in [10, 20] {
+            state
+                .outputs
+                .insert(output, wl_output::WlOutput::inert(backend.clone()));
+            state.output_order.push(output);
+            state.output_info.insert(output, OutputInfo::default());
+            state.dirty_outputs.insert(output);
+            state.surfaces.insert(
+                output,
+                OutputSurface {
+                    surface: wl_surface::WlSurface::inert(backend.clone()),
+                    layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1::inert(
+                        backend.clone(),
+                    ),
+                },
+            );
+            state.surface_to_output.insert(output + 100, output);
+            descriptor.surfaces.push(SurfaceDescriptorEntry {
+                output,
+                handles: None,
+                width: 1920,
+                height: 1080,
+                offset_x: 0,
+                offset_y: 0,
+            });
+        }
+        state.pointer_focus = Some(PointerFocus {
+            output: 10,
+            position: Vec2::ZERO,
+        });
+        let queue = connection.new_event_queue::<WaylandAppState>();
+        <WaylandAppState as wayland_client::Dispatch<wl_output::WlOutput, u32>>::event(
+            &mut state,
+            &wl_output::WlOutput::inert(backend),
+            wl_output::Event::Scale { factor: 2 },
+            &20,
+            &connection,
+            &queue.handle(),
+        );
+        assert_eq!(state.output_info[&20].scale, 2);
+        assert_eq!(state.output_info.len(), 2);
+        state.remove_output(10);
+        sync_surface_descriptor(&mut descriptor, &mut state);
+
+        assert_eq!(descriptor.surfaces.len(), 1);
+        assert_eq!(descriptor.surfaces[0].output, 20);
+        assert_eq!(descriptor.generation, 1);
+        assert!(!state.outputs.contains_key(&10));
+        assert!(!state.output_info.contains_key(&10));
+        assert!(!state.surface_to_output.values().any(|output| *output == 10));
+        assert_eq!(state.output_order, [20]);
+        assert!(state.pointer_focus.is_none());
+        sync_surface_descriptor(&mut descriptor, &mut state);
+        assert_eq!(descriptor.generation, 1);
     }
 }
