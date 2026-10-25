@@ -82,14 +82,14 @@ impl X11RenderTarget {
 pub(crate) struct X11GpuSurfaceState {
     pub surface: Option<wgpu::Surface<'static>>,
     pub config: Option<SurfaceConfiguration>,
-    pub last_applied_generation: u64,
+    pub handles: Option<X11SurfaceHandles>,
 }
 
 impl X11GpuSurfaceState {
     pub(crate) fn mark_stale(&mut self) {
         self.surface = None;
         self.config = None;
-        self.last_applied_generation = 0;
+        self.handles = None;
     }
 }
 
@@ -112,8 +112,7 @@ pub(crate) fn prepare_x11_surface(
         return;
     }
 
-    let needs_recreate =
-        state.surface.is_none() || state.last_applied_generation != descriptor.generation;
+    let needs_recreate = state.surface.is_none() || state.handles != descriptor.handles;
 
     if needs_recreate {
         let handles = descriptor.handles.expect("handles exist");
@@ -128,6 +127,8 @@ pub(crate) fn prepare_x11_surface(
                 .expect("failed to create X11 wgpu surface")
         };
         state.surface = Some(surface);
+        state.handles = Some(handles);
+        state.config = None;
     }
 
     let Some(surface) = state.surface.as_ref() else {
@@ -194,8 +195,6 @@ pub(crate) fn prepare_x11_surface(
 
         state.config = Some(config);
     }
-
-    state.last_applied_generation = descriptor.generation;
 }
 
 pub(crate) fn present_x11_surface(
@@ -231,8 +230,13 @@ pub(crate) fn present_x11_surface(
         CurrentSurfaceTexture::Success(texture) | CurrentSurfaceTexture::Suboptimal(texture) => {
             texture
         }
-        CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
-            warn!("X11 surface outdated/lost; scheduling recreate");
+        CurrentSurfaceTexture::Outdated => {
+            debug!("X11 surface outdated; scheduling reconfigure");
+            state.config = None;
+            return;
+        }
+        CurrentSurfaceTexture::Lost => {
+            warn!("X11 surface lost; scheduling recreate");
             state.mark_stale();
             return;
         }

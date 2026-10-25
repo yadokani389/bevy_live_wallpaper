@@ -140,7 +140,7 @@ pub(crate) struct WaylandGpuSurfaceState {
 pub(crate) struct WaylandGpuPerSurface {
     pub surface: Option<wgpu::Surface<'static>>,
     pub config: Option<SurfaceConfiguration>,
-    pub last_applied_generation: u64,
+    pub handles: Option<WaylandSurfaceHandles>,
 }
 
 pub(crate) fn prepare_wayland_surface(
@@ -150,16 +150,17 @@ pub(crate) fn prepare_wayland_surface(
     render_adapter: Res<RenderAdapter>,
     render_device: Res<RenderDevice>,
 ) {
-    let valid_outputs: Vec<u32> = descriptor.surfaces.iter().map(|s| s.output).collect();
-    state
-        .surfaces
-        .retain(|output, _| valid_outputs.contains(output));
+    state.surfaces.retain(|output, _| {
+        descriptor
+            .surfaces
+            .iter()
+            .any(|surface| surface.output == *output && surface.handles.is_some())
+    });
 
     for surf_desc in descriptor.surfaces.iter().filter(|s| s.handles.is_some()) {
         let entry = state.surfaces.entry(surf_desc.output).or_default();
 
-        let needs_recreate =
-            entry.surface.is_none() || entry.last_applied_generation != descriptor.generation;
+        let needs_recreate = entry.surface.is_none() || entry.handles != surf_desc.handles;
 
         if needs_recreate {
             let handles = surf_desc.handles.expect("handles exist");
@@ -174,6 +175,8 @@ pub(crate) fn prepare_wayland_surface(
                     .expect("failed to create Wayland wgpu surface")
             };
             entry.surface = Some(surface);
+            entry.handles = Some(handles);
+            entry.config = None;
         }
 
         let Some(surface) = entry.surface.as_ref() else {
@@ -195,7 +198,7 @@ pub(crate) fn prepare_wayland_surface(
                 warn!("Wayland surface reported no supported formats; retrying later");
                 entry.surface = None;
                 entry.config = None;
-                entry.last_applied_generation = 0;
+                entry.handles = None;
                 continue;
             }
 
@@ -243,8 +246,6 @@ pub(crate) fn prepare_wayland_surface(
 
             entry.config = Some(config);
         }
-
-        entry.last_applied_generation = descriptor.generation;
     }
 }
 
@@ -297,7 +298,6 @@ pub(crate) fn present_wayland_surface(
                     output
                 );
                 entry.config = None;
-                entry.last_applied_generation = 0;
                 continue;
             }
             CurrentSurfaceTexture::Lost => {
@@ -307,7 +307,7 @@ pub(crate) fn present_wayland_surface(
                 );
                 entry.surface = None;
                 entry.config = None;
-                entry.last_applied_generation = 0;
+                entry.handles = None;
                 continue;
             }
             CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => {
